@@ -1,3 +1,6 @@
+*.pyc
 .*.sw*
 pypeline.log*
+fsl_tutorial2.py*
 graph*.dot*
+crashdumps
