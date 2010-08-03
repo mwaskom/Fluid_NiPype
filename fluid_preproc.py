@@ -1,5 +1,13 @@
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
+"""
+    Preprocessing module for Fluid Intelligence fMRI paradigms.
+    More or less copied directly from nipype fsl tutorials.
+    I believe this pipeline is intended to reproduce the standard
+    FEAT preprocessing.
+"""
+
+
 
 import os                                    # system functions
 import sys
@@ -7,7 +15,6 @@ import nipype.interfaces.io as nio           # Data i/o
 import nipype.interfaces.fsl as fsl          # fsl
 import nipype.interfaces.utility as util     # utility
 import nipype.pipeline.engine as pe          # pypeline engine
-import nipype.algorithms.modelgen as model   # model generation
 import nipype.algorithms.rapidart as ra      # artifact detection
 
 from nipype.externals.pynifti import load
