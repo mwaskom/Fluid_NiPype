@@ -8,7 +8,6 @@
 """
 
 
-
 import os                                    # system functions
 import sys
 import nipype.interfaces.io as nio           # Data i/o
@@ -18,9 +17,6 @@ import nipype.pipeline.engine as pe          # pypeline engine
 import nipype.algorithms.rapidart as ra      # artifact detection
 
 from nipype.externals.pynifti import load
-
-if not fsl.__file__.startswith("/software/python/nipype0.3"):
-    sys.exit("ERROR: Not using nipype0.3")
 
 preproc = pe.Workflow(name="preproc")
 
@@ -297,6 +293,3 @@ preproc.connect([(inputnode, skullstrip,[('struct','in_file')]),
                  (maskfunc2, art, [('out_file','realigned_files')]),
                  (dilatemask, art, [('out_file', 'mask_file')]),
                  ])
-
-if "--graph" in sys.argv or "--writegraph" in sys.argv:
-    preproc.write_graph(graph2use="flat")
