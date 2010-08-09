@@ -4,12 +4,12 @@
     Nipype experiment module for the NBack paradigm.
 """
 
-datainfo = dict(func=[["subject_id", "nii", ["nback_r1","nback_r2"]]],
+datainfo = dict(func=[["subject_id", "nii", "nback_r2"]], #,"nback_r2"]]],
             struct=[["subject_id", "nii", "mprage_mc"]])
 hpcutoff = 128
 TR = 2.
 
-nruns = 2
+nruns = 1
 
 bases = {"dgamma":{"derivs":False}}
 

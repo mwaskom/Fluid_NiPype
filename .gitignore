@@ -2,5 +2,5 @@
 .*.sw*
 pypeline.log*
 fsl_tutorial2.py*
-graph*.dot*
+*graph*.dot*
 crashdumps

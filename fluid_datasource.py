@@ -12,13 +12,13 @@ import nipype.interfaces.io as nio
 import nipype.interfaces.utility as util
 
 data_dir = "/mindhive/gablab/fluid/fmri_MOT_IQ_nback_pilot/data"
-subject_list = ["SMARTER_SP14"]
+subject_list = ["SMARTER_SP15"]
 
-infosource = pe.Node(interface=util.IdentityInterface(fields=["subj_id"]),
+infosource = pe.Node(interface=util.IdentityInterface(fields=["subject_id"]),
                      name="infosource")
 
 
-datasource = pe.Node(interface=nio.DataGrabber(infields=["subj_id"],
+datasource = pe.Node(interface=nio.DataGrabber(infields=["subject_id"],
                                                outfields=["func", "struct"]),
                      name="datasource")
 
