@@ -8,13 +8,14 @@
 """
 
 
-import os                                    # system functions
+import os                               
 import sys
-import nipype.interfaces.io as nio           # Data i/o
-import nipype.interfaces.fsl as fsl          # fsl
-import nipype.interfaces.utility as util     # utility
-import nipype.pipeline.engine as pe          # pypeline engine
-import nipype.algorithms.rapidart as ra      # artifact detection
+import nipype.interfaces.io as nio       
+import nipype.interfaces.fsl as fsl       
+import nipype.interfaces.freesurfer as fs
+import nipype.interfaces.utility as util   
+import nipype.pipeline.engine as pe         
+import nipype.algorithms.rapidart as ra      
 
 from nipype.externals.pynifti import load
 
@@ -247,6 +248,15 @@ highpass = pe.MapNode(interface=fsl.ImageMaths(suffix='_tempfilt'),
                       iterfield=['in_file'],
                       name='highpass')
 preproc.connect(intnorm, 'out_file', highpass, 'in_file')
+
+"""
+Convert the highpass filter output to .nii so SPM can read it
+"""
+
+convert = pe.MapNode(interface=fs.MRIConvert(out_type="nii"), 
+                     iterfield = "in_file",
+                     name="unzip_intnorm")
+preproc.connect(intnorm, "out_file", convert, "in_file")
 
 """
 Generate a mean functional image from the first run

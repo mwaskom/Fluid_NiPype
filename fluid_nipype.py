@@ -4,9 +4,10 @@
     Nipype interface script for the Fluid Intelligence project.
 """
 
-
 import os
 import sys
+import argparse
+from copy import deepcopy
 from datetime import datetime
 
 import nipype.pipeline.engine as pe
@@ -19,113 +20,47 @@ if not pe.__file__.startswith("/software/python/nipype0.3"):
     sys.exit("ERROR: Not using nipype0.3")
 
 from fluid_preproc import preproc
-from fluid_datasource import data_dir, infosource, datasource
-from fluid_modelfit import modelfit
-from fluid_fixedfx import fixed_fx
-from spm_tutorial2 import l1analysis as spm_analysis
+from fluid_fsl_model import fsl_modelfit
+from fluid_spm_model import spm_modelfit
+from fluid_fsl_fixed_fx import fixed_fx
 
-# Subjects.  This won"t stay hardcorded like this
-subject_list = ["SMARTER_SP15"]
+import fluid_utility_funcs as fuf
 
-# We"ll eventually get this from the command line
+""" Handle command line arguments to control the analysis """
+parser = argparse.ArgumentParser(description="Main interface for GFluid NiPype code.")
+
+""" Define the paradigm.  We"ll eventually get this from the command line."""
 paradigm = "nback"
 
-# Dynamically import the experiment file 
+""" Dynamically import the experiment file """
 exp = __import__("%s_experiment" % paradigm)
 
-# Get a reference to the highpass filter node
-highpass = preproc.get_node("highpass")
+""" Subjects.  This won"t stay hardcorded like this """
+subject_list = ["SMARTER_SP14"] # , "SMARTER_SP15"]
 
-# Set the highpass filter for the paradigm
-highpass.inputs.suffix = "_hpf"
-highpass.inputs.op_string = "-bptf %s -1" % (exp.hpcutoff/exp.TR)
-
-# Get a reference to the smooth node
-smooth = preproc.get_node("smooth")
-
-# Set smoothing for the paradigm
-smooth.inputs.fwhm = 6.
-
-# Give the datasource node the template args for this paradigm
-datasource.inputs.template_args = exp.datainfo
-
-# Tell infosource to iterate over all subjects
-infosource.iterables = ("subject_id", subject_list)
-
-# Connect preproc and model flows
-def sort_copes(files):
-    numelements = len(files[0])
-    outfiles = []
-    for i in range(numelements):
-        outfiles.insert(i,[])
-        for j, elements in enumerate(files):
-            outfiles[i].append(elements[i])
-    return outfiles
-
-def num_copes(files):
-    return len(files)
-
-# Convert the highpass filter output to .nii so SPM can read it
-convert = pe.MapNode(interface=fs.MRIConvert(out_type="nii"), 
-                     iterfield = "in_file",
-                     name="convert")
-preproc.connect(highpass, "out_file", convert, "in_file")
-
-firstlevel = pe.Workflow(name="firstlevel")
-firstlevel.connect([(preproc, modelfit, [("convert.out_file", "modelspec.functional_runs"),
-                                         ("art.outlier_files", "modelspec.outlier_files"),
-                                         ("realign.par_file", "modelspec.realignment_parameters"),
-                                         ("highpass.out_file","modelestimate.in_file")]),
-                    (preproc, fixed_fx, [("coregister.out_file", "flameo.mask_file")]),
-                    (modelfit, fixed_fx,[(("conestimate.copes", sort_copes),"copemerge.in_files"),
-                                         (("conestimate.varcopes", sort_copes),"varcopemerge.in_files"),
-                                         (("conestimate.copes", num_copes),"l2model.num_copes"),
-                                         ])
-                    ])
+""" Define the level 1 pipeline"""
+firstlevel = pe.Workflow(name= "level1")
 
 
-# Subjectinfo function returns subj specific info
+""" Tell infosource to iterate over all subjects """
+exp.infosource.iterables = ("subject_id", subject_list)
 
-def parse_par_file(base_dir, subject_id, run_number, name, template):
-    parfile = os.path.join(base_dir, template % (subject_id, subject_id, run_number, name))
-    fid = open(parfile,"r")
-    onsets = []
-    durations = []
-    for line in fid:
-        line = line.split()
-        onsets.append(float(line[0]))
-        durations.append(float(line[1]))
-    return onsets, durations
+""" Add experiment-sepcific information to the workflows """
 
-from nipype.interfaces.base import Bunch
-from copy import deepcopy
-def subjectinfo(subject_id):
-    print "Subject ID: %s\n"%str(subject_id)
-    output = []
-    names = exp.names
-    for r in range(exp.nruns):
-        onsets = []
-        durations = []
-        for name in names:
-            o, d = parse_par_file(data_dir, subject_id, r+1, name, exp.partemp)
-            onsets.append(o)
-            durations.append(d)
-        output.insert(r,
-                      Bunch(conditions=names,
-                            onsets=deepcopy(onsets),
-                            durations=deepcopy(durations),
-                            amplitudes=None,
-                            tmod=None,
-                            pmod=None,
-                            regressor_names=None,
-                            regressors=None))
-    return output
+preproc.inputs.highpass.suffix = "_hpf"
+preproc.inputs.highpass.op_string = "-bptf %s -1" % (exp.hpcutoff/exp.TR)
 
+preproc.inputs.smooth.fwhm = 6.
 
-firstlevel.inputs.modelfit.modelspec.time_repetition = exp.TR
-firstlevel.inputs.modelfit.modelspec.high_pass_filter_cutoff = exp.hpcutoff
-firstlevel.inputs.modelfit.modelspec.input_units = "secs"
-firstlevel.inputs.modelfit.modelspec.output_units = "secs"
+fsl_modelfit.inputs.modelspec.time_repetition = exp.TR
+fsl_modelfit.inputs.modelspec.high_pass_filter_cutoff = exp.hpcutoff
+fsl_modelfit.inputs.modelspec.input_units = exp.units
+fsl_modelfit.inputs.modelspec.output_units = exp.units
+
+spm_modelfit.inputs.modelspec.time_repetition = exp.TR
+spm_modelfit.inputs.modelspec.high_pass_filter_cutoff = exp.hpcutoff
+spm_modelfit.inputs.modelspec.input_units = exp.units
+spm_modelfit.inputs.modelspec.output_units = exp.units
 
 contrast_names = [n for n in exp.__dict__.keys() if "cont" in n] # Python magic
 contrast_names.sort()
@@ -135,52 +70,43 @@ for name in contrast_names:
         if k == name:
             contrasts.append(v)
 
-firstlevel.inputs.modelfit.level1design.contrasts = contrasts
-firstlevel.inputs.modelfit.level1design.interscan_interval = exp.TR
-firstlevel.inputs.modelfit.level1design.bases = exp.bases
+fsl_modelfit.inputs.level1design.contrasts = contrasts
+fsl_modelfit.inputs.level1design.interscan_interval = exp.TR
+fsl_modelfit.inputs.level1design.bases = exp.fsl_bases
 
-l1pipeline = pe.Workflow(name= "level1")
+spm_modelfit.inputs.contrastestimate.contrasts = contrasts
+spm_modelfit.inputs.level1design.interscan_interval = exp.TR
+spm_modelfit.inputs.level1design.bases = exp.spm_bases
+spm_modelfit.inputs.level1design.timing_units = exp.units
 
-
-l1pipeline.connect([(infosource, datasource, [("subject_id", "subject_id")]),
-                    (infosource, firstlevel, 
-                        [(("subject_id", subjectinfo), "modelfit.modelspec.subject_info"),
-                         ("subject_id", "modelfit.modelspec.subject_id")]),
-                    (datasource, firstlevel, [("struct", "preproc.inputspec.struct"),
-                                              ("func", "preproc.inputspec.func"),
-                                              ]),
+""" Connect the workflows """
+firstlevel.connect([(exp.infosource, exp.datasource, 
+                        [("subject_id", "subject_id")]),
+                    (exp.datasource, preproc, 
+                        [("struct", "inputspec.struct"),
+                         ("func", "inputspec.func")]),
+                    (exp.infosource, fsl_modelfit, 
+                        [(("subject_id", fuf.subjectinfo, exp), "modelspec.subject_info"),
+                         ("subject_id", "modelspec.subject_id")]),
+                    (exp.infosource, spm_modelfit, 
+                        [(("subject_id", fuf.subjectinfo, exp), "modelspec.subject_info"),
+                         ("subject_id", "modelspec.subject_id")]),
+                    (preproc, fsl_modelfit, 
+                        [("highpass.out_file", "modelspec.functional_runs"),
+                         ("art.outlier_files", "modelspec.outlier_files"),
+                         ("realign.par_file", "modelspec.realignment_parameters"),
+                         ("highpass.out_file","modelestimate.in_file")]),
+                    (preproc, spm_modelfit, 
+                        [("unzip_intnorm.out_file", "modelspec.functional_runs"),
+                         ("art.outlier_files", "modelspec.outlier_files"),
+                         ("realign.par_file", "modelspec.realignment_parameters")]),
+                    (preproc, fixed_fx, 
+                        [("coregister.out_file", "flameo.mask_file")]),
+                    (fsl_modelfit, fixed_fx,
+                        [(("contrastestimate.copes", fuf.sort_copes),"copemerge.in_files"),
+                         (("contrastestimate.varcopes", fuf.sort_copes),"varcopemerge.in_files"),
+                         (("contrastestimate.copes", lambda x: len(x)),"l2model.num_copes")])
                     ])
-
-# Add in the SPM analysis
-"""Use :class:`nipype.interfaces.spm.EstimateModel` to determine the
-parameters of the model.
-"""
-spm_level1 = pe.Workflow(name= "spm_level1")
-
-spm_level1design = pe.Node(interface=spm.Level1Design(), name= "spm_level1design")
-spm_level1design.inputs.bases              = {'hrf':{'derivs': [0,0]}}
-
-spm_level1estimate = pe.Node(interface=spm.EstimateModel(), name="spm_level1estimate")
-spm_level1estimate.inputs.estimation_method = {'Classical' : 1}
-
-"""Use :class:`nipype.interfaces.spm.EstimateContrast` to estimate the
-first level contrasts specified in a few steps above.
-"""
-
-spm_contrastestimate = pe.Node(interface = spm.EstimateContrast(), name="spm_contrastestimate")
-
-
-spm_level1.connect([(spm_level1design, spm_level1estimate, [("spm_mat_file", "spm_mat_file")]),
-                    (spm_level1estimate, spm_contrastestimate,[('spm_mat_file','spm_mat_file'),
-                                                               ('beta_images','beta_images'),
-                                                               ('residual_image','residual_image')]),
-                  ])
-spm_level1.inputs.spm_level1design.timing_units = "secs"
-spm_level1.inputs.spm_level1design.interscan_interval = exp.TR
-spm_level1.inputs.spm_contrastestimate.contrasts = contrasts
-
-
-l1pipeline.connect(modelfit, "modelspec.session_info", spm_level1, "spm_level1design.session_info")
 
 
 # File crashdumps by date
@@ -189,35 +115,41 @@ codepath = os.path.split(os.path.abspath(__file__))[0]
 crashdir = os.path.abspath("%s/crashdumps/%s" % (codepath, datestamp))
 if not os.path.isdir(crashdir):    
     os.makedirs(crashdir)
-l1pipeline.config = dict(crashdump_dir=crashdir) 
+firstlevel.config = dict(crashdump_dir=crashdir) 
 
-# Setup the preproc working directory
-working_output = os.path.abspath("../nipype_output/workingdir/singlerun/run2")
-l1pipeline.base_dir = working_output
+""" Setup the output """
+working_output = os.path.join(os.path.abspath("../nipype_output/workingdir")) #, paradigm)
+firstlevel.base_dir = working_output
 
-# Datasink
-# --------
+datasink = pe.Node(interface=nio.DataSink(), 
+                      name="datasink")
+datasink.inputs.base_directory = os.path.join(os.path.abspath("../nipype_output/"), paradigm)
 
-datasink = pe.Node(interface=nio.DataSink(), name="datasink")
-datasink.inputs.base_directory = os.path.abspath("../nipype_output/")
+substitutions = []
+for i, name in enumerate(contrasts):
+    substitutions.append(("_flameo%d"%i,contrasts[i][0]))
+datasink.inputs.substitutions = substitutions    
 
-l1pipeline.connect([(infosource, datasink,[("subject_id", "container")]),
-                    (spm_level1, datasink,
-                        [("spm_contrastestimate.con_images","SPM.contrasts.@con"),
-                         ("spm_contrastestimate.spmT_images","SPM.contrasts.@T")]),
-                    (firstlevel, datasink,
-                        [("modelfit.conestimate.tstats", "FSL.level1.@T"),
-                         ("modelfit.conestimate.zstats", "FSL.level1.@Z"),
-                         ("modelfit.conestimate.copes", "FSL.level1.@copes"),
-                         ("modelfit.conestimate.varcopes", "FSL.level1.@varcopes"),
-                         ("fixedfx.flameo.zstats", "FSL.fixedfx.@Z"),
-                         ("fixedfx.flameo.tstats", "FSL.fixedfx.@T"),
-                         ("fixedfx.flameo.copes", "FSL.fixedfx.@copes"),
-                         ("fixedfx.flameo.var_copes", "FSL.fixedfx.@varcopes")])])
-
+firstlevel.connect([(exp.infosource, datasink, 
+                        [("subject_id", "container"),
+                         (("subject_id", lambda x: "_subject_id_%s"%x), "strip_dir")]),
+                    (spm_modelfit, datasink,
+                        [("contrastestimate.con_images","SPM.contrasts.@con"),
+                         ("contrastestimate.spmT_images","SPM.contrasts.@T")]),
+#                    (fsl_modelfit, datasink,
+#                        [("contrastestimate.tstats", "FSL.level1.@T")]),
+#                         ("contrastestimate.zstats", "FSL.level1.@Z"),
+#                         ("contrastestimate.copes", "FSL.level1.@copes"),
+#                         ("contrastestimate.varcopes", "FSL.level1.@varcopes")]),
+                     (fixed_fx, datasink,
+                        [("flameo.stats_dir", "FSL.fixedfx.@stats")])
+#                         ("flameo.tstats", "FSL.fixedfx.@T"),
+#                         ("flameo.copes", "FSL.fixedfx.@copes"),
+#                         ("flameo.var_copes", "FSL.fixedfx.@varcopes")])
+                    ])
 
 # Run the script
 if __name__ == "__main__":
     if not "--norun" in sys.argv:
-        l1pipeline.run()
-    l1pipeline.write_graph(graph2use = "flat")
+        firstlevel.run()
+    firstlevel.write_graph(graph2use = "flat")

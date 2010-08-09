@@ -4,17 +4,40 @@
     Nipype experiment module for the NBack paradigm.
 """
 
-datainfo = dict(func=[["subject_id", "nii", "nback_r2"]], #,"nback_r2"]]],
-            struct=[["subject_id", "nii", "mprage_mc"]])
+import nipype.pipeline.engine as pe
+import nipype.interfaces.io as nio
+import nipype.interfaces.utility as util
+
+data_dir = "/mindhive/gablab/fluid/fmri_MOT_IQ_nback_pilot/data"
+
+infosource = pe.Node(interface=util.IdentityInterface(fields=["subject_id"]),
+                     name="infosource")
+
+
+datasource = pe.Node(interface=nio.DataGrabber(infields=["subject_id"],
+                                               outfields=["func", "struct"]),
+                     name="datasource")
+
+datainfo = dict(func=[["subject_id", "nii", ["NBack1", "NBack2"]]],
+            struct=[["subject_id", "nii", "mprage"]])
+
+datasource.inputs.base_directory = data_dir
+datasource.inputs.template = "%s/%s/%s.nii.gz"
+
+datasource.inputs.template_args = datainfo
+
 hpcutoff = 128
 TR = 2.
+units = "secs"
 
-nruns = 1
+nruns = 2
 
-bases = {"dgamma":{"derivs":False}}
+fsl_bases = {"dgamma":{"derivs":False}}
+spm_bases = {"hrf":[0,0]}
+
+parfile_template = "%s/parfiles/par_%s_d1_r%d_%s.txt"
 
 names = ["0back","1back","2back","4back","inst"]
-partemp = "%s/parfiles/par_%s_d1_r%d_%s.txt"
 
 cont01 = ["0Back", "T", names, [1,0,0,0,0]]
 cont02 = ["1Back", "T", names, [0,1,0,0,0]]
