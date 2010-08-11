@@ -11,6 +11,7 @@ from copy import deepcopy
 from datetime import datetime
 
 import nipype.pipeline.engine as pe
+#import new_io as nio
 import nipype.interfaces.io as nio
 import nipype.interfaces.spm as spm
 import nipype.interfaces.freesurfer as fs
@@ -30,13 +31,13 @@ import fluid_utility_funcs as fuf
 parser = argparse.ArgumentParser(description="Main interface for GFluid NiPype code.")
 
 """ Define the paradigm.  We"ll eventually get this from the command line."""
-paradigm = "nback"
+paradigm = "mot_block"
 
 """ Dynamically import the experiment file """
 exp = __import__("%s_experiment" % paradigm)
 
 """ Subjects.  This won"t stay hardcorded like this """
-subject_list = ["SMARTER_SP14"] # , "SMARTER_SP15"]
+subject_list = ["SMARTER_SP17"] # , "SMARTER_SP15"]
 
 """ Define the level 1 pipeline"""
 firstlevel = pe.Workflow(name= "level1")
@@ -118,12 +119,14 @@ if not os.path.isdir(crashdir):
 firstlevel.config = dict(crashdump_dir=crashdir) 
 
 """ Setup the output """
-working_output = os.path.join(os.path.abspath("../nipype_output/workingdir")) #, paradigm)
+working_output = os.path.join(
+    os.path.abspath("../nipype_output/pilots/workingdir"), paradigm)
 firstlevel.base_dir = working_output
 
 datasink = pe.Node(interface=nio.DataSink(), 
                       name="datasink")
-datasink.inputs.base_directory = os.path.join(os.path.abspath("../nipype_output/"), paradigm)
+datasink.inputs.base_directory = os.path.join(
+    os.path.abspath("../nipype_output/pilots"), paradigm)
 
 substitutions = []
 for i, name in enumerate(contrasts):
@@ -136,16 +139,13 @@ firstlevel.connect([(exp.infosource, datasink,
                     (spm_modelfit, datasink,
                         [("contrastestimate.con_images","SPM.contrasts.@con"),
                          ("contrastestimate.spmT_images","SPM.contrasts.@T")]),
-#                    (fsl_modelfit, datasink,
-#                        [("contrastestimate.tstats", "FSL.level1.@T")]),
-#                         ("contrastestimate.zstats", "FSL.level1.@Z"),
-#                         ("contrastestimate.copes", "FSL.level1.@copes"),
-#                         ("contrastestimate.varcopes", "FSL.level1.@varcopes")]),
-                     (fixed_fx, datasink,
+                    (fsl_modelfit, datasink,
+                        [("contrastestimate.tstats", "FSL.level1.@T"),
+                         ("contrastestimate.zstats", "FSL.level1.@Z"),
+                         ("contrastestimate.copes", "FSL.level1.@copes"),
+                         ("contrastestimate.varcopes", "FSL.level1.@varcopes")]),
+                    (fixed_fx, datasink,
                         [("flameo.stats_dir", "FSL.fixedfx.@stats")])
-#                         ("flameo.tstats", "FSL.fixedfx.@T"),
-#                         ("flameo.copes", "FSL.fixedfx.@copes"),
-#                         ("flameo.var_copes", "FSL.fixedfx.@varcopes")])
                     ])
 
 # Run the script

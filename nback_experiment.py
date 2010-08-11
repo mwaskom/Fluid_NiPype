@@ -18,7 +18,7 @@ datasource = pe.Node(interface=nio.DataGrabber(infields=["subject_id"],
                                                outfields=["func", "struct"]),
                      name="datasource")
 
-datainfo = dict(func=[["subject_id", "nii", ["NBack1", "NBack2"]]],
+datainfo = dict(func=[["subject_id", "nii", ["NBack_run1", "NBack_run2"]]],
             struct=[["subject_id", "nii", "mprage"]])
 
 datasource.inputs.base_directory = data_dir
@@ -35,7 +35,7 @@ nruns = 2
 fsl_bases = {"dgamma":{"derivs":False}}
 spm_bases = {"hrf":[0,0]}
 
-parfile_template = "%s/parfiles/par_%s_d1_r%d_%s.txt"
+parfile_template = "%s/parfiles/NBack_%s_d1_r%d_%s.txt"
 
 names = ["0back","1back","2back","4back","inst"]
 
