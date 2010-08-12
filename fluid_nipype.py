@@ -17,8 +17,8 @@ import nipype.interfaces.spm as spm
 import nipype.interfaces.freesurfer as fs
 
 # Catch when we"re not using the right environment
-if not pe.__file__.startswith("/software/python/nipype0.3"):
-    sys.exit("ERROR: Not using nipype0.3")
+#if not pe.__file__.startswith("/software/python/nipype0.3"):
+#    sys.exit("ERROR: Not using nipype0.3")
 
 from fluid_preproc import preproc
 from fluid_fsl_model import fsl_modelfit
@@ -31,13 +31,19 @@ import fluid_utility_funcs as fuf
 parser = argparse.ArgumentParser(description="Main interface for GFluid NiPype code.")
 
 """ Define the paradigm.  We"ll eventually get this from the command line."""
-paradigm = "mot_block"
+if "--nback" in sys.argv:
+    paradigm = "nback"
+elif "--motjitter" in sys.argv:
+    paradigm = "mot_jitter"
+elif "--motblock" in sys.argv:
+    paradigm = "mot_block"
 
 """ Dynamically import the experiment file """
 exp = __import__("%s_experiment" % paradigm)
 
 """ Subjects.  This won"t stay hardcorded like this """
-subject_list = ["SMARTER_SP17"] # , "SMARTER_SP15"]
+subject_list = ["SMARTER_SP%02d"%(i+1) for i in range(20)]
+subject_list = [subj for subj in subject_list if subj not in exp.exclude_subjects]
 
 """ Define the level 1 pipeline"""
 firstlevel = pe.Workflow(name= "level1")
@@ -63,7 +69,7 @@ spm_modelfit.inputs.modelspec.high_pass_filter_cutoff = exp.hpcutoff
 spm_modelfit.inputs.modelspec.input_units = exp.units
 spm_modelfit.inputs.modelspec.output_units = exp.units
 
-contrast_names = [n for n in exp.__dict__.keys() if "cont" in n] # Python magic
+contrast_names = [n for n in exp.__dict__.keys() if n.startswith("cont")] # Python magic
 contrast_names.sort()
 contrasts = []
 for name in contrast_names:
@@ -84,7 +90,7 @@ spm_modelfit.inputs.level1design.timing_units = exp.units
 firstlevel.connect([(exp.infosource, exp.datasource, 
                         [("subject_id", "subject_id")]),
                     (exp.datasource, preproc, 
-                        [("struct", "inputspec.struct"),
+                        [("target", "inputspec.target"),
                          ("func", "inputspec.func")]),
                     (exp.infosource, fsl_modelfit, 
                         [(("subject_id", fuf.subjectinfo, exp), "modelspec.subject_info"),
@@ -102,7 +108,7 @@ firstlevel.connect([(exp.infosource, exp.datasource,
                          ("art.outlier_files", "modelspec.outlier_files"),
                          ("realign.par_file", "modelspec.realignment_parameters")]),
                     (preproc, fixed_fx, 
-                        [("coregister.out_file", "flameo.mask_file")]),
+                        [("binarize_func.out_file", "flameo.mask_file")]),
                     (fsl_modelfit, fixed_fx,
                         [(("contrastestimate.copes", fuf.sort_copes),"copemerge.in_files"),
                          (("contrastestimate.varcopes", fuf.sort_copes),"varcopemerge.in_files"),

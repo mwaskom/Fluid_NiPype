@@ -2,9 +2,6 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 """
     Preprocessing module for Fluid Intelligence fMRI paradigms.
-    More or less copied directly from nipype fsl tutorials.
-    I believe this pipeline is intended to reproduce the standard
-    FEAT preprocessing.
 """
 
 
@@ -16,8 +13,7 @@ import nipype.interfaces.freesurfer as fs
 import nipype.interfaces.utility as util   
 import nipype.pipeline.engine as pe         
 import nipype.algorithms.rapidart as ra      
-
-from nipype.externals.pynifti import load
+import nibabel
 
 preproc = pe.Workflow(name="preproc")
 
@@ -26,6 +22,7 @@ Set up a node to define all inputs required for the preprocessing workflow
 """
 
 inputnode = pe.Node(interface=util.IdentityInterface(fields=['func',
+                                                             'target',
                                                              'struct',]),
                     name='inputspec')
 
@@ -45,8 +42,9 @@ preproc.connect(inputnode, 'func', img2float, 'in_file')
 Extract the middle volume of the first run as the reference
 """
 
-extract_ref = pe.Node(interface=fsl.ExtractROI(t_size=1),
-                      name = 'extractref')
+extract_ref = pe.MapNode(interface=fsl.ExtractROI(t_size=1),
+                         iterfield=["in_file"],
+                         name = 'extractref')
 
 """
 Define a function to pick the first file from a list of files
@@ -58,7 +56,7 @@ def pickfirst(files):
     else:
         return files
 
-preproc.connect(img2float, ('out_file', pickfirst), extract_ref, 'in_file')
+preproc.connect(img2float, 'out_file', extract_ref, 'in_file')
 
 """
 Define a function to return the 1 based index of the middle volume
@@ -68,19 +66,19 @@ def getmiddlevolume(func):
     funcfile = func
     if isinstance(func, list):
         funcfile = func[0]
-    _,_,_,timepoints = load(funcfile).get_shape()
+    _,_,_,timepoints = nibabel.load(funcfile).get_shape()
     return (timepoints/2)-1
 
 preproc.connect(inputnode, ('func', getmiddlevolume), extract_ref, 't_min')
 
 """
-Realign the functional runs to the middle volume of the first run
+Realign the functional runs to the middle volume of that run
 """
 
 motion_correct = pe.MapNode(interface=fsl.MCFLIRT(save_mats = True,
                                                   save_plots = True),
                             name='realign',
-                            iterfield = ['in_file'])
+                            iterfield = ['in_file', "ref_file"])
 preproc.connect(img2float, 'out_file', motion_correct, 'in_file')
 preproc.connect(extract_ref, 'roi_file', motion_correct, 'ref_file')
 
@@ -183,12 +181,45 @@ meanfunc2 = pe.MapNode(interface=fsl.ImageMaths(op_string='-Tmean',
 preproc.connect(maskfunc2, 'out_file', meanfunc2, 'in_file')
 
 """
+Strip the structural image coregister the mean functional image to the
+structural image, then apply the resulting matrix to the masked timeseries.
+"""
+
+skullstrip = pe.Node(interface=fsl.BET(frac=0.3, mask = True),
+                     name = 'stripstruct')
+
+coregister = pe.MapNode(interface=fsl.FLIRT(dof=6),
+                        iterfield = ["in_file"],
+                        name = 'coregister')
+
+applyxfm = pe.MapNode(interface=fsl.FLIRT(apply_xfm = True),
+                      iterfield = ["in_file", "in_matrix_file"],
+                      name = "applyxfm")
+
+preproc.connect([(inputnode, skullstrip,[('target','in_file')]),
+                 (skullstrip, coregister,[('out_file','reference')]),
+                 (meanfunc2, coregister,[('out_file','in_file')]),
+                 (skullstrip, applyxfm,[("out_file","reference")]),
+                 (coregister, applyxfm,[("out_matrix_file", "in_matrix_file")]),
+                 (maskfunc2, applyxfm,[("out_file", "in_file")])
+                ])
+
+"""
+Binarize the output of the coregistration for use as a mask in FLAMEO later
+"""
+
+binfunc = pe.Node(interface=fsl.ImageMaths(op_string="-bin", suffix="bin"),
+                  name = "binarize_func")
+
+preproc.connect(coregister, ("out_file", pickfirst), binfunc, "in_file")
+
+"""
 Merge the median values with the mean functional images into a coupled list
 """
 
 mergenode = pe.Node(interface=util.Merge(2, axis='hstack'),
                     name='merge')
-preproc.connect(meanfunc2,'out_file', mergenode, 'in1')
+preproc.connect(coregister, 'out_file', mergenode, 'in1')
 preproc.connect(medianval,'out_stat', mergenode, 'in2')
 
                        
@@ -208,7 +239,7 @@ Define a function to get the brightness threshold for SUSAN
 def getbtthresh(medianvals):
     return [0.75*val for val in medianvals]
 
-preproc.connect(maskfunc2, 'out_file', smooth, 'in_file')
+preproc.connect(applyxfm, 'out_file', smooth, 'in_file')
 preproc.connect(medianval, ('out_stat', getbtthresh), smooth, 'brightness_threshold')
 preproc.connect(mergenode, ('out', lambda x: [[tuple([val[0],0.75*val[1]])] for val in x]), smooth, 'usans')
 
@@ -250,7 +281,7 @@ highpass = pe.MapNode(interface=fsl.ImageMaths(suffix='_tempfilt'),
 preproc.connect(intnorm, 'out_file', highpass, 'in_file')
 
 """
-Convert the highpass filter output to .nii so SPM can read it
+Convert the intensity normalization output to .nii so SPM can read it
 """
 
 convert = pe.MapNode(interface=fs.MRIConvert(out_type="nii"), 
@@ -268,23 +299,10 @@ meanfunc3 = pe.MapNode(interface=fsl.ImageMaths(op_string='-Tmean',
                       name='meanfunc3')
 preproc.connect(highpass, ('out_file', pickfirst), meanfunc3, 'in_file')
 
-"""
-Strip the structural image a coregister the mean functional image to the
-structural image
-"""
-
-nosestrip = pe.Node(interface=fsl.BET(frac=0.3),
-                    name = 'nosestrip')
-skullstrip = pe.Node(interface=fsl.BET(mask = True),
-                     name = 'stripstruct')
-
-coregister = pe.Node(interface=fsl.FLIRT(dof=6),
-                     name = 'coregister')
 
 """
-Use :class:`nipype.algorithms.rapidart` to determine which of the
-images in the functional series are outliers based on deviations in
-intensity and/or movement.
+Use rapidart to determine which of the images in the functional series are 
+outliers based on deviations in intensity and/or movement.
 """
 
 art = pe.Node(interface=ra.ArtifactDetect(use_differences = [False,True],
@@ -296,10 +314,7 @@ art = pe.Node(interface=ra.ArtifactDetect(use_differences = [False,True],
               name="art")
 
 
-preproc.connect([(inputnode, skullstrip,[('struct','in_file')]),
-                 (skullstrip, coregister,[('out_file','in_file')]),
-                 (meanfunc2, coregister,[(('out_file',pickfirst),'reference')]),
-                 (motion_correct, art, [('par_file','realignment_parameters')]),
+preproc.connect([(motion_correct, art, [('par_file','realignment_parameters')]),
                  (maskfunc2, art, [('out_file','realigned_files')]),
                  (dilatemask, art, [('out_file', 'mask_file')]),
                  ])

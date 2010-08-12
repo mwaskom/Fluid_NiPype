@@ -12,7 +12,7 @@ def sort_copes(files):
     return outfiles
 
 def parse_par_file(base_dir, subject_id, run_number, name, template):
-    parfile = os.path.join(base_dir, template % (subject_id, subject_id, run_number, name))
+    parfile = os.path.join(base_dir, template % (subject_id, run_number, name, subject_id[-4:]))
     fid = open(parfile,"r")
     onsets = []
     durations = []

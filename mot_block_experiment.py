@@ -15,10 +15,11 @@ infosource = pe.Node(interface=util.IdentityInterface(fields=["subject_id"]),
 
 
 datasource = pe.Node(interface=nio.DataGrabber(infields=["subject_id"],
-                                               outfields=["func", "struct"]),
+                                               outfields=["func", "target", "struct"]),
                      name="datasource")
 
 datainfo = dict(func=[["subject_id", "MOT_Block_run1"]],
+                target=[["subject_id", "ep2d_t1w"]],
                 struct=[["subject_id", "mprage"]])
 
 datasource.inputs.base_directory = data_dir
@@ -26,16 +27,19 @@ datasource.inputs.template = "%s/nii/%s.nii.gz"
 
 datasource.inputs.template_args = datainfo
 
+
+exclude_subjects = ["SMARTER_SP%02d"%i for i in [2, 5, 7, 8, 9]]
+
 hpcutoff = 128
 TR = 2.
 units = "secs"
 
-nruns = 2
+nruns = 1
 
 fsl_bases = {"dgamma":{"derivs":False}}
 spm_bases = {"hrf":[0,0]}
 
-parfile_template = "%s/parfiles/MOT%s_Bitter_r%d_%s.txt"
+parfile_template = "%s/parfiles/MOT%s_Block_r%d_%s.txt"
 
 names = ["speed1", "speed2", "speed3", "speed4", "resp"]
 
