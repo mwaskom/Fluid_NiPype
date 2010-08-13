@@ -6,19 +6,19 @@
 
 import os
 import sys
-import argparse
 from copy import deepcopy
 from datetime import datetime
 
 import nipype.pipeline.engine as pe
-#import new_io as nio
 import nipype.interfaces.io as nio
 import nipype.interfaces.spm as spm
 import nipype.interfaces.freesurfer as fs
 
 # Catch when we"re not using the right environment
-#if not pe.__file__.startswith("/software/python/nipype0.3"):
-#    sys.exit("ERROR: Not using nipype0.3")
+if not pe.__file__.startswith("/software/python/nipype0.3"):
+    sys.exit("ERROR: Not using nipype0.3")
+
+import argparse
 
 from fluid_preproc import preproc
 from fluid_fsl_model import fsl_modelfit
@@ -44,6 +44,9 @@ exp = __import__("%s_experiment" % paradigm)
 """ Subjects.  This won"t stay hardcorded like this """
 subject_list = ["SMARTER_SP%02d"%(i+1) for i in range(20)]
 subject_list = [subj for subj in subject_list if subj not in exp.exclude_subjects]
+
+if "--subject" in sys.argv:
+    subject_list = [sys.argv[sys.argv.index("--subject") + 1]]
 
 """ Define the level 1 pipeline"""
 firstlevel = pe.Workflow(name= "level1")
@@ -130,13 +133,15 @@ working_output = os.path.join(
 firstlevel.base_dir = working_output
 
 datasink = pe.Node(interface=nio.DataSink(), 
-                      name="datasink")
+                   name="datasink")
 datasink.inputs.base_directory = os.path.join(
     os.path.abspath("../nipype_output/pilots"), paradigm)
 
 substitutions = []
 for i, name in enumerate(contrasts):
     substitutions.append(("_flameo%d"%i,contrasts[i][0]))
+for i in range(4):
+    substitutions.append(("_modelestimate%s"%i,"run_%s"%(i+1)))
 datasink.inputs.substitutions = substitutions    
 
 firstlevel.connect([(exp.infosource, datasink, 
@@ -158,4 +163,5 @@ firstlevel.connect([(exp.infosource, datasink,
 if __name__ == "__main__":
     if not "--norun" in sys.argv:
         firstlevel.run()
-    firstlevel.write_graph(graph2use = "flat")
+    if not "--nograph" in sys.argv:
+        firstlevel.write_graph(graph2use = "flat")
