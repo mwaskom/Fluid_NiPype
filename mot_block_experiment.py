@@ -39,7 +39,7 @@ nruns = 1
 fsl_bases = {"dgamma":{"derivs":False}}
 spm_bases = {"hrf":[0,0]}
 
-parfile_template = "%s/parfiles/MOT%s_Block_r%d_%s.txt"
+parfile_template = "%s/parfiles/MOT_Block_r%d_%s_%s.txt"
 
 names = ["speed1", "speed2", "speed3", "speed4", "resp"]
 

@@ -34,6 +34,8 @@ units = "secs"
 
 nruns = 1
 
+exclude_subjects = []
+
 fsl_bases = {"dgamma":{"derivs":False}}
 spm_bases = {"hrf":[0,0]}
 
