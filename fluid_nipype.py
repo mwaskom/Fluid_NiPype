@@ -30,6 +30,12 @@ import fluid_utility_funcs as fuf
 """ Handle command line arguments to control the analysis """
 parser = argparse.ArgumentParser(description="Main interface for GFluid NiPype code.")
 
+if "--spm" in sys.argv:
+    do_spm = True
+else:
+    do_spm = False
+
+
 """ Define the paradigm.  We"ll eventually get this from the command line."""
 if "--nback" in sys.argv:
     paradigm = "nback"
@@ -51,7 +57,6 @@ if "--subject" in sys.argv:
 """ Define the level 1 pipeline"""
 firstlevel = pe.Workflow(name= "level1")
 
-
 """ Tell infosource to iterate over all subjects """
 exp.infosource.iterables = ("subject_id", subject_list)
 
@@ -62,15 +67,13 @@ preproc.inputs.highpass.op_string = "-bptf %s -1" % (exp.hpcutoff/exp.TR)
 
 preproc.inputs.smooth.fwhm = 6.
 
-fsl_modelfit.inputs.modelspec.time_repetition = exp.TR
-fsl_modelfit.inputs.modelspec.high_pass_filter_cutoff = exp.hpcutoff
-fsl_modelfit.inputs.modelspec.input_units = exp.units
-fsl_modelfit.inputs.modelspec.output_units = exp.units
-
-spm_modelfit.inputs.modelspec.time_repetition = exp.TR
-spm_modelfit.inputs.modelspec.high_pass_filter_cutoff = exp.hpcutoff
-spm_modelfit.inputs.modelspec.input_units = exp.units
-spm_modelfit.inputs.modelspec.output_units = exp.units
+""" Connect the workflows """
+firstlevel.connect([(exp.infosource, exp.datasource, 
+                        [("subject_id", "subject_id")]),
+                    (exp.datasource, preproc, 
+                        [("target", "inputspec.target"),
+                         ("func", "inputspec.func")])
+                   ])
 
 contrast_names = [n for n in exp.__dict__.keys() if n.startswith("cont")] # Python magic
 contrast_names.sort()
@@ -80,25 +83,16 @@ for name in contrast_names:
         if k == name:
             contrasts.append(v)
 
+fsl_modelfit.inputs.modelspec.time_repetition = exp.TR
+fsl_modelfit.inputs.modelspec.high_pass_filter_cutoff = exp.hpcutoff
+fsl_modelfit.inputs.modelspec.input_units = exp.units
+fsl_modelfit.inputs.modelspec.output_units = exp.units
+
 fsl_modelfit.inputs.level1design.contrasts = contrasts
 fsl_modelfit.inputs.level1design.interscan_interval = exp.TR
 fsl_modelfit.inputs.level1design.bases = exp.fsl_bases
 
-spm_modelfit.inputs.contrastestimate.contrasts = contrasts
-spm_modelfit.inputs.level1design.interscan_interval = exp.TR
-spm_modelfit.inputs.level1design.bases = exp.spm_bases
-spm_modelfit.inputs.level1design.timing_units = exp.units
-
-""" Connect the workflows """
-firstlevel.connect([(exp.infosource, exp.datasource, 
-                        [("subject_id", "subject_id")]),
-                    (exp.datasource, preproc, 
-                        [("target", "inputspec.target"),
-                         ("func", "inputspec.func")]),
-                    (exp.infosource, fsl_modelfit, 
-                        [(("subject_id", fuf.subjectinfo, exp), "modelspec.subject_info"),
-                         ("subject_id", "modelspec.subject_id")]),
-                    (exp.infosource, spm_modelfit, 
+firstlevel.connect([(exp.infosource, fsl_modelfit, 
                         [(("subject_id", fuf.subjectinfo, exp), "modelspec.subject_info"),
                          ("subject_id", "modelspec.subject_id")]),
                     (preproc, fsl_modelfit, 
@@ -106,16 +100,35 @@ firstlevel.connect([(exp.infosource, exp.datasource,
                          ("art.outlier_files", "modelspec.outlier_files"),
                          ("realign.par_file", "modelspec.realignment_parameters"),
                          ("highpass.out_file","modelestimate.in_file")]),
-                    (preproc, spm_modelfit, 
-                        [("unzip_intnorm.out_file", "modelspec.functional_runs"),
-                         ("art.outlier_files", "modelspec.outlier_files"),
-                         ("realign.par_file", "modelspec.realignment_parameters")]),
-                    (preproc, fixed_fx, 
-                        [("binarize_func.out_file", "flameo.mask_file")]),
-                    (fsl_modelfit, fixed_fx,
-                        [(("contrastestimate.copes", fuf.sort_copes),"copemerge.in_files"),
-                         (("contrastestimate.varcopes", fuf.sort_copes),"varcopemerge.in_files"),
-                         (("contrastestimate.copes", lambda x: len(x)),"l2model.num_copes")])
+                    ])
+if do_spm:
+    spm_modelfit.inputs.modelspec.time_repetition = exp.TR
+    spm_modelfit.inputs.modelspec.high_pass_filter_cutoff = exp.hpcutoff
+    spm_modelfit.inputs.modelspec.input_units = exp.units
+    spm_modelfit.inputs.modelspec.output_units = exp.units
+
+    spm_modelfit.inputs.contrastestimate.contrasts = contrasts
+    spm_modelfit.inputs.level1design.interscan_interval = exp.TR
+    spm_modelfit.inputs.level1design.bases = exp.spm_bases
+    spm_modelfit.inputs.level1design.timing_units = exp.units
+    
+    firstlevel.connect([(exp.infosource, spm_modelfit, 
+                            [(("subject_id", fuf.subjectinfo, exp), "modelspec.subject_info"),
+                             ("subject_id", "modelspec.subject_id")]),
+                        (preproc, spm_modelfit, 
+                            [("unzip_intnorm.out_file", "modelspec.functional_runs"),
+                             ("art.outlier_files", "modelspec.outlier_files"),
+                             ("realign.par_file", "modelspec.realignment_parameters")])
+                        ])
+
+if exp.nruns > 1:
+    firstlevel.connect(
+                    [(preproc, fixed_fx, 
+                       [("binarize_func.out_file", "flameo.mask_file")]),
+                     (fsl_modelfit, fixed_fx,
+                       [(("contrastestimate.copes", fuf.sort_copes),"copemerge.in_files"),
+                        (("contrastestimate.varcopes", fuf.sort_copes),"varcopemerge.in_files"),
+                        (("contrastestimate.copes", lambda x: len(x)),"l2model.num_copes")])
                     ])
 
 
@@ -139,7 +152,7 @@ datasink.inputs.base_directory = os.path.join(
 
 substitutions = []
 for i, name in enumerate(contrasts):
-    substitutions.append(("_flameo%d"%i,contrasts[i][0]))
+    substitutions.append(("_flameo%d/"%i,"%s/"%contrasts[i][0]))
 for i in range(4):
     substitutions.append(("_modelestimate%s"%i,"run_%s"%(i+1)))
 datasink.inputs.substitutions = substitutions    
@@ -147,17 +160,21 @@ datasink.inputs.substitutions = substitutions
 firstlevel.connect([(exp.infosource, datasink, 
                         [("subject_id", "container"),
                          (("subject_id", lambda x: "_subject_id_%s"%x), "strip_dir")]),
-                    (spm_modelfit, datasink,
-                        [("contrastestimate.con_images","SPM.contrasts.@con"),
-                         ("contrastestimate.spmT_images","SPM.contrasts.@T")]),
                     (fsl_modelfit, datasink,
                         [("contrastestimate.tstats", "FSL.level1.@T"),
                          ("contrastestimate.zstats", "FSL.level1.@Z"),
                          ("contrastestimate.copes", "FSL.level1.@copes"),
-                         ("contrastestimate.varcopes", "FSL.level1.@varcopes")]),
-                    (fixed_fx, datasink,
-                        [("flameo.stats_dir", "FSL.fixedfx.@stats")])
+                         ("contrastestimate.varcopes", "FSL.level1.@varcopes")])
                     ])
+if exp.nruns > 1:                    
+    firstlevel.connect([(fixed_fx, datasink,
+                            [("flameo.stats_dir", "FSL.fixedfx.@stats")])])
+if do_spm:
+    firstlevel.connect([
+                    (spm_modelfit, datasink,
+                        [("contrastestimate.con_images","SPM.contrasts.@con"),
+                         ("contrastestimate.spmT_images","SPM.contrasts.@T")])
+                        ])
 
 # Run the script
 if __name__ == "__main__":
