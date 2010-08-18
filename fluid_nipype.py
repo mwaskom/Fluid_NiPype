@@ -5,6 +5,7 @@
 """
 
 import os
+import re
 import sys
 from copy import deepcopy
 from datetime import datetime
@@ -91,7 +92,7 @@ firstlevel.connect([(infosource, datasource,
                          ("func", "inputspec.func")])
                    ])
 
-contrast_names = [n for n in exp.__dict__.keys() if n.startswith("cont")] # Python magic
+contrast_names = [n for n in exp.__dict__.keys() if re.match("cont\d*", n)] # Python magic
 contrast_names.sort()
 contrasts = []
 for name in contrast_names:
