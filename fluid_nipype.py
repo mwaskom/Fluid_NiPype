@@ -24,6 +24,7 @@ from fluid_preproc import preproc
 from fluid_fsl_model import fsl_modelfit
 from fluid_spm_model import spm_modelfit
 from fluid_fsl_fixed_fx import fixed_fx
+from fluid_source import infosource, datasource
 
 import fluid_utility_funcs as fuf
 
@@ -43,34 +44,49 @@ elif "--motjitter" in sys.argv:
     paradigm = "mot_jitter"
 elif "--motblock" in sys.argv:
     paradigm = "mot_block"
+elif "--iq" in sys.argv:
+    paradigm = "iq"
+elif "--rt2" in sys.argv:
+    paradigm = "rt_tworun"
+elif "--rt" in sys.argv:
+    paradigm = "rt"
 
 """ Dynamically import the experiment file """
 exp = __import__("%s_experiment" % paradigm)
 
 """ Subjects.  This won"t stay hardcorded like this """
-subject_list = ["SMARTER_SP%02d"%(i+1) for i in range(20)]
-subject_list = [subj for subj in subject_list if subj not in exp.exclude_subjects]
+if hasattr(exp, "subject_list"):
+    subject_list = exp.subject_list
+else:
+    subject_list = ["SMARTER_SP%02d"%(i+1) for i in range(23)]
+if hasattr(exp, "exclude_subjects"):    
+    subject_list = [subj for subj in subject_list if subj not in exp.exclude_subjects]
 
 if "--subject" in sys.argv:
     subject_list = [sys.argv[sys.argv.index("--subject") + 1]]
+
+""" Set experimental source attributes. """
+datasource.inputs.template = exp.source_template
+datasource.inputs.template_args = exp.template_args
+
+exp.data_dir = datasource.inputs.base_directory
 
 """ Define the level 1 pipeline"""
 firstlevel = pe.Workflow(name= "level1")
 
 """ Tell infosource to iterate over all subjects """
-exp.infosource.iterables = ("subject_id", subject_list)
+infosource.iterables = ("subject_id", subject_list)
 
 """ Add experiment-sepcific information to the workflows """
-
 preproc.inputs.highpass.suffix = "_hpf"
 preproc.inputs.highpass.op_string = "-bptf %s -1" % (exp.hpcutoff/exp.TR)
 
 preproc.inputs.smooth.fwhm = 6.
 
 """ Connect the workflows """
-firstlevel.connect([(exp.infosource, exp.datasource, 
+firstlevel.connect([(infosource, datasource, 
                         [("subject_id", "subject_id")]),
-                    (exp.datasource, preproc, 
+                    (datasource, preproc, 
                         [("target", "inputspec.target"),
                          ("func", "inputspec.func")])
                    ])
@@ -92,7 +108,7 @@ fsl_modelfit.inputs.level1design.contrasts = contrasts
 fsl_modelfit.inputs.level1design.interscan_interval = exp.TR
 fsl_modelfit.inputs.level1design.bases = exp.fsl_bases
 
-firstlevel.connect([(exp.infosource, fsl_modelfit, 
+firstlevel.connect([(infosource, fsl_modelfit, 
                         [(("subject_id", fuf.subjectinfo, exp), "modelspec.subject_info"),
                          ("subject_id", "modelspec.subject_id")]),
                     (preproc, fsl_modelfit, 
@@ -112,7 +128,7 @@ if do_spm:
     spm_modelfit.inputs.level1design.bases = exp.spm_bases
     spm_modelfit.inputs.level1design.timing_units = exp.units
     
-    firstlevel.connect([(exp.infosource, spm_modelfit, 
+    firstlevel.connect([(infosource, spm_modelfit, 
                             [(("subject_id", fuf.subjectinfo, exp), "modelspec.subject_info"),
                              ("subject_id", "modelspec.subject_id")]),
                         (preproc, spm_modelfit, 
@@ -150,14 +166,18 @@ datasink = pe.Node(interface=nio.DataSink(),
 datasink.inputs.base_directory = os.path.join(
     os.path.abspath("../nipype_output/pilots"), paradigm)
 
+if exp.nruns == 1:
+    datasink.inputs.parameterization = False
+
 substitutions = []
 for i, name in enumerate(contrasts):
-    substitutions.append(("_flameo%d/"%i,"%s/"%contrasts[i][0]))
-for i in range(4):
+    substitutions.append(("_flameo%d"%i,"%s"%contrasts[i][0]))
+for i in range(exp.nruns):
     substitutions.append(("_modelestimate%s"%i,"run_%s"%(i+1)))
+substitutions.reverse()
 datasink.inputs.substitutions = substitutions    
 
-firstlevel.connect([(exp.infosource, datasink, 
+firstlevel.connect([(infosource, datasink, 
                         [("subject_id", "container"),
                          (("subject_id", lambda x: "_subject_id_%s"%x), "strip_dir")]),
                     (fsl_modelfit, datasink,
@@ -170,10 +190,9 @@ if exp.nruns > 1:
     firstlevel.connect([(fixed_fx, datasink,
                             [("flameo.stats_dir", "FSL.fixedfx.@stats")])])
 if do_spm:
-    firstlevel.connect([
-                    (spm_modelfit, datasink,
-                        [("contrastestimate.con_images","SPM.contrasts.@con"),
-                         ("contrastestimate.spmT_images","SPM.contrasts.@T")])
+    firstlevel.connect([(spm_modelfit, datasink,
+                            [("contrastestimate.con_images","SPM.contrasts.@con"),
+                             ("contrastestimate.spmT_images","SPM.contrasts.@T")])
                         ])
 
 # Run the script

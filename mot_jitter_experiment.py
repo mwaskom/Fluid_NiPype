@@ -1,32 +1,11 @@
-# vi: set ft=python sts=4 ts=4 sw=4 et:
-# emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 """
     Nipype experiment module for the jittered MOTT paradigm.
 """
+template_args = dict(func=[["subject_id", "MOT_Jitter_run1"]],
+                     target=[["subject_id", "ep2d_t1w"]],
+                     struct=[["subject_id", "mprage"]])
 
-import nipype.pipeline.engine as pe
-import nipype.interfaces.io as nio
-import nipype.interfaces.utility as util
-
-data_dir = "/mindhive/gablab/fluid/fmri_MOT_IQ_nback_pilot/data"
-
-infosource = pe.Node(interface=util.IdentityInterface(fields=["subject_id"]),
-                     name="infosource")
-
-
-datasource = pe.Node(interface=nio.DataGrabber(infields=["subject_id"],
-                                               outfields=["func", "target", "struct"]),
-                     name="datasource")
-
-datainfo = dict(func=[["subject_id", "MOT_Jitter_run1"]],
-                target=[["subject_id", "ep2d_t1w"]],
-                struct=[["subject_id", "mprage"]])
-
-datasource.inputs.base_directory = data_dir
-datasource.inputs.template = "%s/nii/%s.nii.gz"
-
-datasource.inputs.template_args = datainfo
-
+source_template = "%s/nii/%s.nii.gz"
 
 exclude_subjects = ["SMARTER_SP%02d"%i for i in [2, 7, 8, 9]]
 

@@ -1,40 +1,21 @@
-# vi: set ft=python sts=4 ts=4 sw=4 et:
-# emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 """
     Nipype experiment module for the NBack paradigm.
 """
 
-import nipype.pipeline.engine as pe
-import nipype.interfaces.io as nio
-import nipype.interfaces.utility as util
+template_args = dict(func=[["subject_id", "nii", 
+                             ["NBack_run1", "NBack_run2", "NBack_run3", "NBack_run4"]]],
+                     target=[["subject_id", "nii", "ep2d_t1w"]],
+                     struct=[["subject_id", "nii", "mprage"]])
 
-data_dir = "/mindhive/gablab/fluid/fmri_MOT_IQ_nback_pilot/data"
-
-infosource = pe.Node(interface=util.IdentityInterface(fields=["subject_id"]),
-                     name="infosource")
-
-
-datasource = pe.Node(interface=nio.DataGrabber(infields=["subject_id"],
-                                               outfields=["func", "target", "struct"]),
-                     name="datasource")
-
-datainfo = dict(func=[["subject_id", "nii", 
-                          ["NBack_run1"]]], #, "NBack_run2", "NBack_run3", "NBack_run4"]]],
-                target=[["subject_id", "nii", "ep2d_t1w"]],
-                struct=[["subject_id", "nii", "mprage"]])
-
-datasource.inputs.base_directory = data_dir
-datasource.inputs.template = "%s/%s/%s.nii.gz"
-
-datasource.inputs.template_args = datainfo
+source_template = "%s/%s/%s.nii.gz"
 
 hpcutoff = 128
 TR = 2.
 units = "secs"
 
-nruns = 1
+nruns = 4
 
-exclude_subjects = []
+exclude_subjects = ["SMARTER_SP%02d"%i for i in range(17)]
 
 fsl_bases = {"dgamma":{"derivs":False}}
 spm_bases = {"hrf":[0,0]}

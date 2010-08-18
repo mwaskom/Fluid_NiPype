@@ -1,43 +1,26 @@
-# vi: set ft=python sts=4 ts=4 sw=4 et:
-# emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 """
-    Nipype experiment module for the simply/choice rt paradigm.
+    Nipype experiment module for the simple/choice reaction-time paradigm.
 """
+template_args = dict(func=[["subject_id", "TestRT_run1"]],
+                     target=[["subject_id", "ep2d_t1w"]],
+                     struct=[["subject_id", "mprage"]])
 
-import nipype.pipeline.engine as pe
-import nipype.interfaces.io as nio
-import nipype.interfaces.utility as util
-
-data_dir = "/mindhive/gablab/fluid/fmri_MOT_IQ_nback_pilot/data"
-
-infosource = pe.Node(interface=util.IdentityInterface(fields=["subject_id"]),
-                     name="infosource")
-
-
-datasource = pe.Node(interface=nio.DataGrabber(infields=["subject_id"],
-                                               outfields=["func", "struct"]),
-                     name="datasource")
-
-datainfo = dict(func=[["subject_id", ["TestRT_run1", "TestRT_run2"]],
-                struct=[["subject_id", "mprage"]])
-
-datasource.inputs.base_directory = data_dir
-datasource.inputs.template = "%s/nii/%s.nii.gz"
-
-datasource.inputs.template_args = datainfo
+source_template = "%s/nii/%s.nii.gz"
 
 hpcutoff = 128
 TR = 2.
 units = "secs"
 
-nruns = 2
+nruns = 1
+
+exclude_subjects = ["SMARTER_SP%02d"%i for i in [1,2,3,7,8,9,10,11]]
 
 fsl_bases = {"dgamma":{"derivs":False}}
 spm_bases = {"hrf":[0,0]}
 
-parfile_template = "%s/parfiles/RT%s_%s_r%d.txt"
+parfile_template = "%s/parfiles/TestRT_r%d_%s_%s.txt"
 
-names = ["Simple", "Choice", "Inst"]
+names = ["simple", "choice", "inst"]
 
 cont01 = ["simple", "T", names, [1,0,0]]
 cont02 = ["choice", "T", names, [0,1,0]]
