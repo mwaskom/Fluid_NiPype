@@ -6,7 +6,7 @@ import nipype.pipeline.engine as pe
 import nipype.interfaces.io as nio
 import nipype.interfaces.utility as util
 
-data_dir = "/mindhive/gablab/fluid/fmri_MOT_IQ_nback_pilot/data"
+data_dir = "/mindhive/gablab/fluid/Data"
 
 infosource = pe.Node(interface=util.IdentityInterface(fields=["subject_id"]),
                      name="infosource")
