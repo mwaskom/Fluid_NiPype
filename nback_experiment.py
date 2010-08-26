@@ -1,6 +1,7 @@
 """
     Nipype experiment module for the NBack paradigm.
 """
+import re
 
 template_args = dict(func=[["subject_id", "nii", 
                              ["NBack_run1", "NBack_run2", "NBack_run3", "NBack_run4"]]],
@@ -15,12 +16,10 @@ units = "secs"
 
 nruns = 4
 
-exclude_subjects = ["SMARTER_SP%02d"%i for i in range(17)]
-
 fsl_bases = {"dgamma":{"derivs":False}}
 spm_bases = {"hrf":[0,0]}
 
-parfile_template = "%s/parfiles/NBack_r%d_%s_%s.txt"
+parfile_template = "%s/parfiles/NBack_r%d_d1_%s_%s.txt"
 
 names = ["zero","easy","medium","hard","inst"]
 
@@ -35,3 +34,9 @@ cont08 = ["hard-zero", "T", names, [-1,0,0,1,0]]
 cont09 = ["hard-easy", "T", names, [0,-1,0,1,0]]
 cont10 = ["hard-medium", "T", names, [0,0,-1,1,0]]
 cont11 = ["load-zero", "T", names, [-1,1./3,1./3,1./3,0]]
+
+convars = [var for var in dir() if re.match("cont\d+",var)]
+convars.sort()
+
+contrasts = [globals()[con] for con in convars]
+
