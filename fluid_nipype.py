@@ -14,6 +14,7 @@ import nipype.pipeline.engine as pe
 import nipype.interfaces.io as nio
 import nipype.interfaces.spm as spm
 import nipype.interfaces.freesurfer as fs
+import nipype.interfaces.utility as util
 
 # Catch when we"re not using the right environment
 if (not pe.__file__.startswith("/software/python/nipype0.3") 
@@ -32,29 +33,22 @@ import fluid_utility_funcs as fuf
 
 """ Handle command line arguments to control the analysis """
 parser = argparse.ArgumentParser(description="Main interface for GFluid NiPype code.")
-
-if "--spm" in sys.argv:
-    do_spm = True
-else:
-    do_spm = False
-
-
-""" Define the paradigm.  We"ll eventually get this from the command line."""
-if "--nback" in sys.argv:
-    paradigm = "nback"
-elif "--motjitter" in sys.argv:
-    paradigm = "mot_jitter"
-elif "--motblock" in sys.argv:
-    paradigm = "mot_block"
-elif "--iq" in sys.argv:
-    paradigm = "iq"
-elif "--rt2" in sys.argv:
-    paradigm = "rt_tworun"
-elif "--rt" in sys.argv:
-    paradigm = "rt"
-
+parser.add_argument("--paradigm", dest="paradigm", metavar="paradigm",
+                    help="experimental paradigm")
+parser.add_argument("--subject", dest="subjects", 
+                    metavar="subject_id", action="append",
+                    help="run pypeline for subject(s)")
+parser.add_argument("--norun",dest="run",action="store_false",
+                    help="do not run the pypeline")
+parser.add_argument("--nograph",dest="write_graph",action="store_false",
+                    help="do not write a graph")
+parser.add_argument("--inseries",action="store_true",
+                    help="force running in series")
+parser.add_argument("--runspm",action="store_true",
+                    help="run spm first level")
+args = parser.parse_args()
 """ Dynamically import the experiment file """
-exp = __import__("%s_experiment" % paradigm)
+exp = __import__("%s_experiment" % args.paradigm)
 
 """ Subjects.  This won"t stay hardcorded like this """
 if hasattr(exp, "subject_list"):
@@ -64,8 +58,8 @@ else:
 if hasattr(exp, "exclude_subjects"):    
     subject_list = [subj for subj in subject_list if subj not in exp.exclude_subjects]
 
-if "--subject" in sys.argv:
-    subject_list = [sys.argv[sys.argv.index("--subject") + 1]]
+if args.subjects:
+    subject_list = args.subjects
 
 """ Set experimental source attributes. """
 datasource.inputs.template = exp.source_template
@@ -120,7 +114,7 @@ firstlevel.connect([(infosource, fsl_modelfit,
                     ])
 
 
-if do_spm:
+if args.runspm:
     spm_modelfit.inputs.modelspec.time_repetition = exp.TR
     spm_modelfit.inputs.modelspec.high_pass_filter_cutoff = exp.hpcutoff
     spm_modelfit.inputs.modelspec.input_units = exp.units
@@ -162,21 +156,30 @@ firstlevel.config = dict(crashdump_dir=crashdir)
 
 """ Setup the output """
 working_output = os.path.join(
-    os.path.abspath("../Analysis/NiPype/workingdir"), paradigm)
+    os.path.abspath("../Analysis/NiPype/workingdir"), args.paradigm)
 firstlevel.base_dir = working_output
 
-output_base = os.path.join(os.path.abspath("../Analysis/NiPype"), paradigm)
+output_base = os.path.join(os.path.abspath("../Analysis/NiPype"), args.paradigm)
 
 datasink = pe.Node(interface=nio.DataSink(), 
                    name="datasink")
 datasink.inputs.base_directory = output_base
+datasink.overwrite = True
 
 reportsub = []
 imagesub = []
 
 for r in range(exp.nruns):
-    reportsub.append(("_sliceresidual%d"%r,"run_%d"%(r+1)))
-    imagesub.append(("_modelestimate%d"%r,"run_%d"%(r+1)))
+    runstr = "run_%d"%(r+1)
+    for type in ["rotations","translations"]:
+        reportsub.append(("_plot_type_%s/_plotmotion%d"%(type,r),runstr))
+    reportsub.append(("_plotdisplacement%d"%r,runstr))
+    reportsub.append(("_sliceresidual%d"%r,runstr))
+    reportsub.append(("_modelgen%d"%r,runstr))
+    reportsub.append(("run%d"%r,"design"))
+    imagesub.append(("_modelestimate%d"%r,runstr))
+    imagesub.append(("_highpass%d"%r,""))
+    imagesub.append(("_realign%d"%r,""))
 for con, conparams in enumerate(contrasts):
     for r in range(exp.nruns):
         reportsub.append(("_index_%d/_slicestats%d/zstat%d_"%(con,r,con+1),
@@ -186,17 +189,33 @@ for con, conparams in enumerate(contrasts):
 reportsub.reverse()
 imagesub.reverse()
 
-datasink.inputs.substitutions = imagesub
+mergesubs = pe.Node(interface=util.Merge(numinputs=4),
+                       name="mergesubstitutes")
+
+firstlevel.connect([(preproc, mergesubs,
+                       [(("highpass.out_file",fuf.sub,"preproc_func.nii.gz"),"in1"),
+                        (("art.outlier_files",fuf.sub,"outliers.txt"),"in2"),
+                        (("realign.par_file",fuf.sub,"motion_params.par"),"in3"),
+                        (("binarize_func.out_file",fuf.sub,"func_mask.nii.gz",False),"in4")])
+                    ])
 
 report = pe.Node(interface=nio.DataSink(),
                  name="report")
 report.inputs.base_directory = os.path.join(output_base, "report")
 report.inputs.substitutions = reportsub
 report.inputs.parameterization = True
+report.overwrite = True
 
 firstlevel.connect([(infosource, datasink, 
                         [("subject_id", "container"),
                          (("subject_id", lambda x: "_subject_id_%s"%x), "strip_dir")]),
+                    (mergesubs, datasink,
+                        [(("out", lambda x: imagesub + x), "substitutions")]),
+                    (preproc, datasink,
+                        [("highpass.out_file", "preproc.@functional_runs"),
+                         ("art.outlier_files", "preproc.@outlier_files"),
+                         ("realign.par_file", "preproc.@realign_parameters"),
+                         ("binarize_func.out_file", "preproc.@func_mask")]),
                     (fsl_modelfit, datasink,
                         [("modelestimate.results_dir", "level1.model.@results"),
                          ("contrastestimate.tstats", "level1.contrasts.@T"),
@@ -206,8 +225,13 @@ firstlevel.connect([(infosource, datasink,
                     (infosource, report,
                         [("subject_id", "container"),
                          (("subject_id", lambda x: "_subject_id_%s"%x), "strip_dir")]),
+                    (preproc, report,
+                        [("plotmotion.out_file", "preproc.@motionplots"),
+                         ("plotdisplacement.out_file", "preproc.@displacementplots")]),
                     (fsl_modelfit, report,
-                        [("slicestats.out_file", "level1.@zstats"),
+                        [("modelgen.design_image", "level1.@design"),
+                         ("modelgen.design_cov", "level1.@covariance"),
+                         ("slicestats.out_file", "level1.@zstats"),
                          ("sliceresidual.out_file", "level1.@sigmasquared")]),
                     ])
 if exp.nruns > 1:                    
@@ -216,7 +240,7 @@ if exp.nruns > 1:
                         (fixed_fx, report,
                             [("sliceflame.out_file", "fixedfx.@zstats")])
                         ])
-if do_spm:
+if args.runspm:
     firstlevel.connect([(spm_modelfit, datasink,
                             [("contrastestimate.con_images","SPM.contrasts.@con"),
                              ("contrastestimate.spmT_images","SPM.contrasts.@T")])
@@ -224,11 +248,7 @@ if do_spm:
 
 # Run the script
 if __name__ == "__main__":
-    if "--inseries" in sys.argv:
-        inseries = True
-    else:
-        inseries = False
-    if not "--norun" in sys.argv:
-        firstlevel.run(inseries=inseries)
-    if not "--nograph" in sys.argv:
+    if args.run:
+        firstlevel.run(inseries=args.inseries)
+    if args.write_graph:
         firstlevel.write_graph(graph2use = "flat")
