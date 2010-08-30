@@ -1,6 +1,7 @@
 import os
 from copy import deepcopy
 from nipype.interfaces.base import Bunch
+from nipype.utils.filemanip import split_filename
 
 def sort_copes(files):
     numelements = len(files[0])
@@ -44,4 +45,12 @@ def subjectinfo(subject_id, exp):
                             regressors=None))
     return output
 
-
+def sub(origpath, subname, addrun=True):
+    if not isinstance(origpath, list):
+        origpath = [origpath]
+    _, name, ext = split_filename(subname)
+    if addrun:
+        return [(os.path.split(path)[1], name+"_run_%d"%(i+1)+ext)
+                    for i, path in enumerate(origpath)]
+    else:
+        return [(os.path.split(path)[1], subname) for path in origpath]
