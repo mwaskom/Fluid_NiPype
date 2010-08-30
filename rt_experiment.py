@@ -30,4 +30,4 @@ cont04 = ["choice-simple", "T", names, [-1,1,0]]
 convars = [var for var in dir() if re.match("cont\d+",var)]
 convars.sort()
 
-contrasts = [globals()[con] for con in convars]
+contrasts = [locals()[con] for con in convars]
