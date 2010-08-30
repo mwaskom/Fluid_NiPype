@@ -76,12 +76,32 @@ Realign the functional runs to the middle volume of that run
 """
 
 motion_correct = pe.MapNode(interface=fsl.MCFLIRT(save_mats = True,
-                                                  save_plots = True),
+                                                  save_plots = True,
+                                                  save_rms = True),
                             name='realign',
                             iterfield = ['in_file', "ref_file"])
 preproc.connect(img2float, 'out_file', motion_correct, 'in_file')
 preproc.connect(extract_ref, 'roi_file', motion_correct, 'ref_file')
 
+"""
+Plot the motion and displacement estimates from MCFLIRT
+"""
+
+plotmotion = pe.MapNode(interface=fsl.PlotMotionParams(in_source="fsl"),
+                        name="plotmotion",
+                        iterfield=["in_file"])
+plotmotion.iterables = ("plot_type", ["rotations","translations"])        
+
+preproc.connect(motion_correct, "par_file", plotmotion, "in_file")
+
+
+plotdisp = pe.MapNode(interface=fsl.PlotMotionParams(in_source="fsl",
+                                                     plot_type="displacement"),
+                      name="plotdisplacement",
+                      iterfield=["in_file"])
+
+preproc.connect(motion_correct, "rms_files", plotdisp, "in_file")
+                      
 """
 Extract the mean volume of the first functional run
 """
