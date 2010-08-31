@@ -33,7 +33,7 @@ import fluid_utility_funcs as fuf
 
 """ Handle command line arguments to control the analysis """
 parser = argparse.ArgumentParser(description="Main interface for GFluid NiPype code.")
-parser.add_argument("--paradigm", dest="paradigm", metavar="paradigm",
+parser.add_argument("--paradigm", dest="paradigm", metavar="paradigm", required=True,
                     help="experimental paradigm")
 parser.add_argument("--subject", dest="subjects", 
                     metavar="subject_id", action="append",
