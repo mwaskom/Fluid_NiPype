@@ -3,11 +3,11 @@
 """
 import re
 
-template_args = dict(func=[["subject_id", "IQ_run1"]],
-                    target=[["subject_id", "ep2d_t1w"]],
-                    struct=[["subject_id", "mprage"]])
+template_args = dict(func=[["subject_id", "bold", "IQ_run1"]],
+                    target=[["subject_id", "structural", "ep2d_t1w"]],
+                    struct=[["subject_id", "structural",  "mprage"]])
 
-source_template = "%s/nii/%s.nii.gz"
+source_template = "%s/%s/%s.nii.gz"
 
 hpcutoff = 128
 TR = 2.
