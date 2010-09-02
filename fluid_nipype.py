@@ -33,7 +33,7 @@ import fluid_utility_funcs as fuf
 
 """ Handle command line arguments to control the analysis """
 parser = argparse.ArgumentParser(description="Main interface for GFluid NiPype code.")
-parser.add_argument("--paradigm", dest="paradigm", metavar="paradigm", required=True,
+parser.add_argument("-p", "--paradigm", dest="paradigm", metavar="paradigm", required=True,
                     help="experimental paradigm")
 parser.add_argument("--subject", dest="subjects", 
                     metavar="subject_id", action="append",
@@ -54,7 +54,7 @@ exp = __import__("%s_experiment" % args.paradigm)
 if hasattr(exp, "subject_list"):
     subject_list = exp.subject_list
 else:
-    subject_list = ["gf%02d"%id for id in [05, 14]]
+    subject_list = ["gf%02d"%id for id in [5, 9, 13, 14]]
 if hasattr(exp, "exclude_subjects"):    
     subject_list = [subj for subj in subject_list if subj not in exp.exclude_subjects]
 
