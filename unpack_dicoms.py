@@ -1,3 +1,8 @@
+"""
+DICOM Unpacking script for the Fluid Intelligence project.
+Will unpack DICOM directory, create heuristic softlinks, and optionally,
+submit recon-all jobs to the Sun Grid Engine
+"""
 import os
 import sys
 import shutil
@@ -13,23 +18,31 @@ import nipype.interfaces.freesurfer as fs
 import nipype.pipeline.engine as pe
 
 # Command line arguments
-parser = argparse.ArgumentParser()
-parser.add_argument("-subjects", nargs="*", help="list of subject ids")
+parser = argparse.ArgumentParser(usage="unpack_dicoms.py [options]")
+parser.add_argument("-subjects", nargs="*", metavar="subjid",
+                    help="list of subject ids to unpack")
 parser.add_argument("-all", action="store_true", 
                     help="run all subjects with dicom dir")
+parser.add_argument("-dontunpack", nargs="*", metavar="num",
+                    help="sequence number of run(s) to skip")
+parser.add_argument("-recon", action="store_true",
+                    help="Submit a recon-all job to SGE after unpacking")
 parser.add_argument("-norun", dest="run", action="store_false",
                     help="don't run the unpacking pipeline")
 parser.add_argument("-nolink", dest="link", action="store_false",
                     help="don't create the heuristic links")
 parser.add_argument("-relink", action="store_true",
                     help="overwrite any old heuristic links")
-parser.add_argument("-dontunpack", nargs="*", help="sequence number of run(s) to skip")
-parser.add_argument("-inseries", action="store_true", help="run nipype in series")                    
+parser.add_argument("-inseries", action="store_true", 
+                    help="force running nipype in series")
 args = parser.parse_args()
 
 # Hardcoded data directory and template
 datadir = "/mindhive/gablab/fluid/Data/"
 subject_template = "gf*"
+
+# Initialize the subjectinfo dict
+subjectinfo = {}
 
 # Get subjects from command line, or glob based on template
 if args.subjects:
@@ -41,9 +54,9 @@ else:
     print "\nMust use either '-subjects' or '-all'"
     sys.exit(0)
 
-#===========================
-# Functions for the pipeline
-#===========================
+#====================#
+# Pipeline functions #
+#====================#
 
 def get_dicom_dir(subject):
     """Return the path to a dicom directory"""
@@ -65,33 +78,38 @@ def parse_info_file(dcminfofile, writeflf=True):
         subject = [d.replace("_sid_","") for d in infopath if d.startswith("_sid_")][0]
     except IndexError:
         subject = [d for d in infopath if d.startswith(subject_template.replace("*",""))][0]
-    seqfile = np.genfromtxt(dcminfofile, dtype=object)
-    info = []
-    # Parse by line
-    for l in seqfile:
-        seqn = l[2]
-        if not args.dontunpack or not seqn in args.dontunpack:
-            name = l[12]
-            dcmfile = l[1]
-            x,y,s,t = tuple([int(dim) for dim in l[6:10]])
-            
-            if (s==176) and (t==1) and name.startswith("T1_MPRAGE"):
-                info.append(("structural",dcmfile,seqn, name))
-                info.append(("mprage",dcmfile,seqn, name))
-            elif (t==8) and name.startswith("gre_mgh_multiecho"):
-                info.append(("structural",dcmfile,seqn, name))
-            elif name == "ep2d_t1w":
-                info.append(("structural",dcmfile,seqn, name))
-            elif not is_moco(os.path.join(datadir, subject, "dicom", dcmfile)):
-                if (t==198) and name.startswith("NBack"):
-                    info.append(("bold",dcmfile,seqn, name))
-                elif (t==208) and name.startswith("RT_ge_func"):
-                    info.append(("bold",dcmfile,seqn, name))
-                elif (t==244) and name.startswith("IQ_ge_func"):
-                    info.append(("bold",dcmfile,seqn, name))
-            else:
-                pass
     
+    try:
+        info = subjectinfo[subject]
+    except KeyError:
+        seqfile = np.genfromtxt(dcminfofile, dtype=object)
+        info = []
+        # Parse by line
+        for l in seqfile:
+            seqn = l[2]
+            if not args.dontunpack or not seqn in args.dontunpack:
+                name = l[12]
+                dcmfile = l[1]
+                x,y,s,t = tuple([int(dim) for dim in l[6:10]])
+                
+                if (s==176) and (t==1) and name.startswith("T1_MPRAGE"):
+                    info.append(("structural",dcmfile,seqn, name))
+                    info.append(("mprage",dcmfile,seqn, name))
+                elif (t==8) and name.startswith("gre_mgh_multiecho"):
+                    info.append(("structural",dcmfile,seqn, name))
+                elif name == "ep2d_t1w":
+                    info.append(("structural",dcmfile,seqn, name))
+                elif not is_moco(os.path.join(datadir, subject, "dicom", dcmfile)):
+                    if (t==198) and name.startswith("NBack"):
+                        info.append(("bold",dcmfile,seqn, name))
+                    elif (t==208) and name.startswith("RT_ge_func"):
+                        info.append(("bold",dcmfile,seqn, name))
+                    elif (t==244) and name.startswith("IQ_ge_func"):
+                        info.append(("bold",dcmfile,seqn, name))
+                else:
+                    pass
+        subjectinfo[subject] = info
+
     # Write files containing lists of the dicoms in each series to speed up mri_convert
     if writeflf:
         for seqinfo in info:
@@ -122,9 +140,9 @@ def get_out_ftype(dcminfofile):
     return typelist
     
 
-#===================
-# Unpacking pipeline
-#===================
+#====================#
+# Unpacking pipeline #
+#====================#
 
 subjsource = pe.Node(interface=util.IdentityInterface(fields=["sid"]),
                      name='subjinfo',
@@ -217,9 +235,9 @@ if args.run:
     unpack.run(inseries=args.inseries)
     unpack.write_graph(graph2use="flat")
 
-#=======================
-# Softlink heuristically
-#=======================
+#========================#
+# Softlink heuristically #
+#========================#
 
 def get_nii_name(subj, seq):
     """Get the source file name"""    
@@ -267,5 +285,23 @@ for subj in subjects:
                     print "Target file %s exists; use -relink to overwrite"%trg
             else:
                 print "Source file %s not found"%src
-    else:
+    elif not args.link:
         print "Info file %s not found"%infofile
+
+#=================#
+# Start recon-all
+#=================#
+if args.recon:
+    for subj in subjects:
+        # Make sure the source image exists
+        if os.path.isfile(os.path.join(datadir, subj, "mri/orig/001.mgz")):
+            # Make sure a recon hasn't been started for this subject
+            if not os.path.isfile(os.path.join(datadir, subj, "scripts/recon-all-status.log")):
+                reconcmd = "'recon-all -s %s -all'"%subj
+                sgecmd = "ezsub.py -c %s -n %s_recon -q long.q"%(reconcmd, subj)
+                print "Submitting %s recon job to SGE"%subj
+                os.system(sgecmd)
+            else:
+                print "Recon submission requested for %s, but recon status log exists"%subj
+        else:
+            print "Recon submission requested for %s, but recon source image does not exist"%subj
