@@ -7,6 +7,7 @@
 import os
 import re
 import sys
+import shutil
 from copy import deepcopy
 from datetime import datetime
 
@@ -23,7 +24,7 @@ if (not pe.__file__.startswith("/software/python/nipype0.3")
 
 import argparse
 
-from fluid_preproc import preproc
+from fluid_new_preproc import preproc
 from fluid_fsl_model import fsl_modelfit
 from fluid_spm_model import spm_modelfit
 from fluid_fsl_fixed_fx import fixed_fx
@@ -33,18 +34,18 @@ import fluid_utility_funcs as fuf
 
 """ Handle command line arguments to control the analysis """
 parser = argparse.ArgumentParser(description="Main interface for GFluid NiPype code.")
-parser.add_argument("-p", "--paradigm", dest="paradigm", metavar="paradigm", required=True,
+parser.add_argument("-paradigm", metavar="paradigm", required=True,
                     help="experimental paradigm")
-parser.add_argument("--subject", dest="subjects", 
+parser.add_argument("-subject", dest="subjects", 
                     metavar="subject_id", action="append",
                     help="run pypeline for subject(s)")
-parser.add_argument("--norun",dest="run",action="store_false",
+parser.add_argument("-norun",dest="run",action="store_false",
                     help="do not run the pypeline")
-parser.add_argument("--nograph",dest="write_graph",action="store_false",
+parser.add_argument("-nograph",dest="write_graph",action="store_false",
                     help="do not write a graph")
-parser.add_argument("--inseries",action="store_true",
+parser.add_argument("-inseries",action="store_true",
                     help="force running in series")
-parser.add_argument("--runspm",action="store_true",
+parser.add_argument("-runspm",action="store_true",
                     help="run spm first level")
 args = parser.parse_args()
 """ Dynamically import the experiment file """
@@ -77,14 +78,16 @@ infosource.iterables = ("subject_id", subject_list)
 preproc.inputs.highpass.suffix = "_hpf"
 preproc.inputs.highpass.op_string = "-bptf %s -1" % (exp.hpcutoff/exp.TR)
 
-preproc.inputs.smooth.fwhm = 6.
+smoothvalnode = preproc.get_node("smoothval")
+smoothvalnode.iterables = ("fwhm", [0.1,5.])
 
 """ Connect the workflows """
 firstlevel.connect([(infosource, datasource, 
                         [("subject_id", "subject_id")]),
+                    (infosource, preproc,
+                        [("subject_id", "inputspec.subject_id")]),
                     (datasource, preproc, 
-                        [("target", "inputspec.target"),
-                         ("func", "inputspec.func")])
+                        [("func", "inputspec.func")])
                    ])
 
 contrasts = exp.contrasts
@@ -137,7 +140,7 @@ if args.runspm:
 if exp.nruns > 1:
     firstlevel.connect(
                     [(preproc, fixed_fx, 
-                       [("binarize_func.out_file", "flameo.mask_file"),
+                       [("dilatemask.out_file", "flameo.mask_file"),
                        (("meanfunc3.out_file", lambda x: x[0]), "overlayflame.background_image")]),
                      (fsl_modelfit, fixed_fx,
                        [(("contrastestimate.copes", fuf.sort_copes),"copemerge.in_files"),
@@ -196,7 +199,7 @@ firstlevel.connect([(preproc, mergesubs,
                        [(("highpass.out_file",fuf.sub,"preproc_func.nii.gz"),"in1"),
                         (("art.outlier_files",fuf.sub,"outliers.txt"),"in2"),
                         (("realign.par_file",fuf.sub,"motion_params.par"),"in3"),
-                        (("binarize_func.out_file",fuf.sub,"func_mask.nii.gz",False),"in4")])
+                        (("dilatemask.out_file",fuf.sub,"func_mask.nii.gz",False),"in4")])
                     ])
 
 report = pe.Node(interface=nio.DataSink(),
@@ -215,7 +218,7 @@ firstlevel.connect([(infosource, datasink,
                         [("highpass.out_file", "preproc.@functional_runs"),
                          ("art.outlier_files", "preproc.@outlier_files"),
                          ("realign.par_file", "preproc.@realign_parameters"),
-                         ("binarize_func.out_file", "preproc.@func_mask")]),
+                         ("dilatemask.out_file", "preproc.@func_mask")]),
                     (fsl_modelfit, datasink,
                         [("modelestimate.results_dir", "level1.model.@results"),
                          ("contrastestimate.tstats", "level1.contrasts.@T"),
@@ -247,8 +250,13 @@ if args.runspm:
                         ])
 
 # Run the script
-if __name__ == "__main__":
-    if args.run:
-        firstlevel.run(inseries=args.inseries)
-    if args.write_graph:
-        firstlevel.write_graph(graph2use = "flat")
+if args.run:
+    firstlevel.run(inseries=args.inseries)
+    fulllog = open("log_archive/%s/%s.log"%(datestamp, args.paradigm),"w")
+    for lf in ["pypeline.log%s"%n for n in [".4",".3",".2",".1",""]]:
+        if os.path.isfile(lf):
+            fulllog.write(open(lf).read())
+            os.remove(lf)
+    fulllog.close()
+if args.write_graph:
+    firstlevel.write_graph(graph2use = "flat")

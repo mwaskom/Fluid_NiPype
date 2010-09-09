@@ -267,9 +267,8 @@ unpack.config = dict(crashdump_dir=crashdir)
 
 # Run the pipeline
 if args.run:
-    timestamp = str(datetime.now())[:-10].replace("-","").replace(":","").replace(" ","-")
     unpack.run(inseries=args.inseries)
-    fulllog = open("/mindhive/gablab/fluid/NiPype_Code/log_archive/unpack-%s.log"%timestamp,"w")
+    fulllog = open("/mindhive/gablab/fluid/NiPype_Code/log_archive/%s/unpack.log"%datestamp,"w")
     for lf in ["pypeline.log%s"%n for n in [".4",".3",".2",".1",""]]:
         if os.path.isfile(lf):
             fulllog.write(open(lf).read())
