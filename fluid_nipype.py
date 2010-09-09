@@ -252,7 +252,10 @@ if args.runspm:
 # Run the script
 if args.run:
     firstlevel.run(inseries=args.inseries)
-    fulllog = open("log_archive/%s/%s.log"%(datestamp, args.paradigm),"w")
+    logdir = "/mindhive/gablab/fluid/NiPype_Code/log_archive/%s"%datestamp
+    if not os.path.isdir(logdir):
+        os.mkdir(logdir)
+    fulllog = open("%s/%s.log"%(logdir,args.paradigm),"w")
     for lf in ["pypeline.log%s"%n for n in [".4",".3",".2",".1",""]]:
         if os.path.isfile(lf):
             fulllog.write(open(lf).read())
