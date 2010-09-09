@@ -22,8 +22,7 @@ Set up a node to define all inputs required for the preprocessing workflow
 """
 
 inputnode = pe.Node(interface=util.IdentityInterface(fields=['func',
-                                                             'target',
-                                                             'struct',]),
+                                                             'struct']),
                     name='inputspec')
 
 """
@@ -101,37 +100,78 @@ plotdisp = pe.MapNode(interface=fsl.PlotMotionParams(in_source="fsl",
                       iterfield=["in_file"])
 
 preproc.connect(motion_correct, "rms_files", plotdisp, "in_file")
-                      
-"""
-Extract the mean volume of the first functional run
-"""
-
-meanfunc = pe.Node(interface=fsl.ImageMaths(op_string = '-Tmean',
-                                            suffix='_mean'),
-                   name='meanfunc')
-preproc.connect(motion_correct, ('out_file', pickfirst), meanfunc, 'in_file')
 
 """
-Strip the skull from the mean functional to generate a mask
+Get a mean image for each realigned run
 """
 
-meanfuncmask = pe.Node(interface=fsl.BET(mask = True,
-                                         no_output=True,
-                                         frac = 0.3),
-                       name = 'meanfuncmask')
-preproc.connect(meanfunc, 'out_file', meanfuncmask, 'in_file')
+meanfunc = pe.MapNode(interface=fsl.ImageMaths(op_string='-Tmean',
+                                               suffix='_mean'),
+                       iterfield=['in_file'],
+                       name='meanfunc')
+
+preproc.connect(realign, "out_file", meanfunc, "in_file")
 
 """
-Mask the functional runs with the extracted mask
+Generate linear registration matricies for each run to the anatomical
+volume and apply the registration to the timeseries(es)
 """
 
-maskfunc = pe.MapNode(interface=fsl.ImageMaths(suffix='_bet',
-                                               op_string='-mas'),
-                      iterfield=['in_file'],
-                      name = 'maskfunc')
-preproc.connect(motion_correct, 'out_file', maskfunc, 'in_file')
-preproc.connect(meanfuncmask, 'mask_file', maskfunc, 'in_file2')
+reg2struct = pe.MapNode(interface=fs.BBRegister(contrast_type="bold",
+                                            init = "fsl"),
+                        iterfield=["source_file"],
+                        name="reg2struct")
 
+preproc.connect(meanfunc, "out_file", reg2struct, "source_file")
+
+"""
+Get the brainmask volume from recon-all
+"""
+
+masksource = pe.Node(interface=nio.FreeSurferSource(),
+                     name="masksource")
+
+"""
+Resample the brainmask image into native functional space
+"""
+
+resamplemask = pe.Node(interface=fs.ApplyVolTransform(inverse=True),
+                       name="resamplemask")
+
+preproc.connect([(masksource, resamplemask, [("brainmask", "source_file")]),
+                  (reg2struct, resamplemask, [("out_reg_file", "reg_file")])])
+
+"""
+Binarize the brainmask image in functional space to create a true mask
+"""
+
+binmask = pe.Node(interface=fs.Binarize(min=10),
+                  name="binarizemask")
+
+preproc.connect(resamplemask, "out_file", binmask, "in_file")
+
+"""
+Convert the mask image from mgz to nifti so it can be used by FSL tools
+"""
+
+niftimask = pe.Node(interface=fs.MRIConvert(out_type="niigz"),
+                    name="niftimask")
+
+preproc.connect(binmask, "out_file", niftimask, "in_file")
+
+
+"""
+Use this mask image to skullstrip each realigned functional run
+"""
+
+skullstrip = pe.MapNode(interface=fsl.ImageMaths(suffix="_strip",
+                                                 op_string="-mas"),
+                        iterfield=["in_file"],
+                        name="skullstrip")
+
+preproc.connect([(motion_correct, skullstrip, [('out_file', 'in_file')]),
+                 (niftimask, skullstrip, [("out_file", "in_file2")])
+                 ]) 
 
 """
 Determine the 2nd and 98th percentile intensities of each functional run
@@ -140,8 +180,7 @@ Determine the 2nd and 98th percentile intensities of each functional run
 getthresh = pe.MapNode(interface=fsl.ImageStats(op_string='-p 2 -p 98'),
                        iterfield = ['in_file'],
                        name='getthreshold')
-preproc.connect(maskfunc, 'out_file', getthresh, 'in_file')
-
+preproc.connect(skullstrip, 'out_file', getthresh, 'in_file')
 
 """
 Threshold the first run of the functional data at 10% of the 98th percentile
@@ -150,13 +189,11 @@ Threshold the first run of the functional data at 10% of the 98th percentile
 threshold = pe.Node(interface=fsl.ImageMaths(out_data_type='char',
                                              suffix='_thresh'),
                        name='threshold')
-preproc.connect(maskfunc, ('out_file', pickfirst), threshold, 'in_file')
+preproc.connect(skullstrip, ('out_file', pickfirst), threshold, 'in_file')
 
-"""
-Define a function to get 10% of the intensity
-"""
 
 def getthreshop(thresh):
+    """Return 10% of the intensity as an fslmaths option string"""
     return '-thr %.10f -Tmin -bin'%(0.1*thresh[0][1])
 preproc.connect(getthresh, ('out_stat', getthreshop), threshold, 'op_string')
 
@@ -169,69 +206,6 @@ medianval = pe.MapNode(interface=fsl.ImageStats(op_string='-k %s -p 50'),
                        name='medianval')
 preproc.connect(motion_correct, 'out_file', medianval, 'in_file')
 preproc.connect(threshold, 'out_file', medianval, 'mask_file')
-
-"""
-Dilate the mask
-"""
-
-dilatemask = pe.Node(interface=fsl.ImageMaths(suffix='_dil',
-                                              op_string='-dilF'),
-                       name='dilatemask')
-preproc.connect(threshold, 'out_file', dilatemask, 'in_file')
-
-"""
-Mask the motion corrected functional runs with the dilated mask
-"""
-
-maskfunc2 = pe.MapNode(interface=fsl.ImageMaths(suffix='_mask',
-                                                op_string='-mas'),
-                      iterfield=['in_file'],
-                      name='maskfunc2')
-preproc.connect(motion_correct, 'out_file', maskfunc2, 'in_file')
-preproc.connect(dilatemask, 'out_file', maskfunc2, 'in_file2')
-
-"""
-Determine the mean image from each functional run
-"""
-
-meanfunc2 = pe.MapNode(interface=fsl.ImageMaths(op_string='-Tmean',
-                                                suffix='_mean'),
-                       iterfield=['in_file'],
-                       name='meanfunc2')
-preproc.connect(maskfunc2, 'out_file', meanfunc2, 'in_file')
-
-"""
-Strip the structural image coregister the mean functional image to the
-structural image, then apply the resulting matrix to the masked timeseries.
-"""
-
-skullstrip = pe.Node(interface=fsl.BET(frac=0.3, mask = True),
-                     name = 'stripstruct')
-
-coregister = pe.MapNode(interface=fsl.FLIRT(dof=6),
-                        iterfield = ["in_file"],
-                        name = 'coregister')
-
-applyxfm = pe.MapNode(interface=fsl.FLIRT(apply_xfm = True),
-                      iterfield = ["in_file", "in_matrix_file"],
-                      name = "applyxfm")
-
-preproc.connect([(inputnode, skullstrip,[('target','in_file')]),
-                 (skullstrip, coregister,[('out_file','reference')]),
-                 (meanfunc2, coregister,[('out_file','in_file')]),
-                 (skullstrip, applyxfm,[("out_file","reference")]),
-                 (coregister, applyxfm,[("out_matrix_file", "in_matrix_file")]),
-                 (maskfunc2, applyxfm,[("out_file", "in_file")])
-                ])
-
-"""
-Binarize the output of the coregistration for use as a mask in FLAMEO later
-"""
-
-binfunc = pe.Node(interface=fsl.ImageMaths(op_string="-bin", suffix="bin"),
-                  name = "binarize_func")
-
-preproc.connect(coregister, ("out_file", pickfirst), binfunc, "in_file")
 
 """
 Merge the median values with the mean functional images into a coupled list
@@ -335,6 +309,6 @@ art = pe.Node(interface=ra.ArtifactDetect(use_differences = [False,True],
 
 
 preproc.connect([(motion_correct, art, [('par_file','realignment_parameters')]),
-                 (maskfunc2, art, [('out_file','realigned_files')]),
-                 (dilatemask, art, [('out_file', 'mask_file')]),
+                 (skullstrip, art, [('out_file','realigned_files')]),
+                 (niftimask, art, [('out_file', 'mask_file')]),
                  ])
