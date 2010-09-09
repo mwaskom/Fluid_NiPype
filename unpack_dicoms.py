@@ -1,6 +1,6 @@
 """
 DICOM Unpacking script for the Fluid Intelligence project.
-Will unpack DICOM directory, create heuristic softlinks, and optionally,
+Will unpack DICOM directory, create heuristic softlinks, and optionally
 submit recon-all jobs to the Sun Grid Engine
 """
 import os
@@ -21,20 +21,28 @@ import nipype.pipeline.engine as pe
 parser = argparse.ArgumentParser(usage="unpack_dicoms.py [options]")
 parser.add_argument("-subjects", nargs="*", metavar="subjid",
                     help="list of subject ids to unpack")
+parser.add_argument("-type", metavar="scantype", help="func, struct, or full")
 parser.add_argument("-all", action="store_true", 
                     help="run all subjects with dicom dir")
 parser.add_argument("-dontunpack", nargs="*", metavar="num",
                     help="sequence number of run(s) to skip")
+parser.add_argument("-moco", action="store_true",
+                    help="unpack the MoCo BOLD runs")
 parser.add_argument("-recon", action="store_true",
                     help="Submit a recon-all job to SGE after unpacking")
 parser.add_argument("-norun", dest="run", action="store_false",
                     help="don't run the unpacking pipeline")
 parser.add_argument("-nolink", dest="link", action="store_false",
                     help="don't create the heuristic links")
+parser.add_argument("-reparse", action="store_true",
+                    help="force rerunning of the dicom directory parsing")
+parser.add_argument("-reconvert", action="store_true",
+                    help="force rerunning of the dicom conversion")
 parser.add_argument("-relink", action="store_true",
                     help="overwrite any old heuristic links")
 parser.add_argument("-inseries", action="store_true", 
                     help="force running nipype in series")
+parser.add_argument("-debug", action="store_true", help="turn on debugging")
 args = parser.parse_args()
 
 # Hardcoded data directory and template
@@ -48,11 +56,10 @@ subjectinfo = {}
 if args.subjects:
     subjects = args.subjects
 elif args.all:
-    subject_dirs = glob(os.path.join(datadir, subject_template, "dicom"))
+    subject_dirs = glob(os.path.join(datadir, subject_template, "dicom", args.type))
     subjects = [d.split("/")[-2] for d in subject_dirs]
 else:
-    print "\nMust use either '-subjects' or '-all'"
-    sys.exit(0)
+    sys.exit("\nMust use either -subjects or -all")
 
 #====================#
 # Pipeline functions #
@@ -60,7 +67,7 @@ else:
 
 def get_dicom_dir(subject):
     """Return the path to a dicom directory"""
-    return glob(os.path.join(datadir,subject,"dicom"))[0]
+    return glob(os.path.join(datadir,subject,"dicom",args.type))[0]
 
 def is_moco(dcmfile):
     """Determine if a run has on-line motion correction"""
@@ -96,16 +103,30 @@ def parse_info_file(dcminfofile, writeflf=True):
                     info.append(("structural",dcmfile,seqn, name))
                     info.append(("mprage",dcmfile,seqn, name))
                 elif (t==8) and name.startswith("gre_mgh_multiecho"):
-                    info.append(("structural",dcmfile,seqn, name))
+                    angle = name[18:-12]
+                    info.append(("structural",dcmfile,seqn, "flash_%02d"%int(angle)))
                 elif name == "ep2d_t1w":
                     info.append(("structural",dcmfile,seqn, name))
-                elif not is_moco(os.path.join(datadir, subject, "dicom", dcmfile)):
+                elif not is_moco(os.path.join(datadir,subject,"dicom",args.type,dcmfile)):
                     if (t==198) and name.startswith("NBack"):
                         info.append(("bold",dcmfile,seqn, name))
                     elif (t==208) and name.startswith("RT_ge_func"):
                         info.append(("bold",dcmfile,seqn, name))
                     elif (t==244) and name.startswith("IQ_ge_func"):
                         info.append(("bold",dcmfile,seqn, name))
+                    elif (t==62) and name.endswith("Resting"):
+                        info.append(("bold",dcmfile,seqn,"Resting"))
+                elif (args.moco
+                      and is_moco(os.path.join(datadir,subject,"dicom",args.type,dcmfile))):
+                    name = name.split("_")[0] + "-moco"
+                    if (t==198) and name.startswith("NBack"):
+                        info.append(("bold",dcmfile,seqn, name))
+                    elif (t==208) and name.startswith("RT_ge_func"):
+                        info.append(("bold",dcmfile,seqn, name))
+                    elif (t==244) and name.startswith("IQ_ge_func"):
+                        info.append(("bold",dcmfile,seqn, name))
+                    elif (t==62) and name.endswith("Resting"):
+                        info.append(("bold",dcmfile,seqn,"Resting"))
                 else:
                     pass
         subjectinfo[subject] = info
@@ -116,8 +137,10 @@ def parse_info_file(dcminfofile, writeflf=True):
             flfdir = os.path.join(datadir, subject, "unpack", "flf")
             if not os.path.isdir(flfdir):
                 os.makedirs(flfdir)
-            alldcms = glob(os.path.join(datadir,subject,"dicom",seqinfo[1][:-5]+"*"))
-            flffile = open(os.path.join(flfdir, subject + "_seq" + seqinfo[2]),"w")
+            alldcms = glob(os.path.join(
+                datadir,subject,"dicom",args.type,seqinfo[1][:-5]+"*"))
+            flffile = open(os.path.join(
+                flfdir, subject + "_%s"%args.type + "_seq" + seqinfo[2]),"w")
             flffile.write(" ".join(alldcms))
             flffile.close()
 
@@ -126,19 +149,27 @@ def parse_info_file(dcminfofile, writeflf=True):
 def get_out_filename(dcminfofile):
     """Name the raw nifti files based on the seqence number"""
     infolist = parse_info_file(dcminfofile)
-    return ["seq_%02d"%int(t[2]) for t in infolist]
+    return ["%s_seq_%02d"%(args.type,int(t[2])) for t in infolist]
 
 def get_out_ftype(dcminfofile):
-    """Write files to nii.gz unless it's the mprage"""
+    """Write files to nii.gz unless it's the mprage or flash"""
     infolist = parse_info_file(dcminfofile)
     typelist = []
+    if args.debug:
+        print "Running get_out_ftype function"
     for info in infolist:
-        if info[0] == "mprage":
+        if args.debug:
+            print "Sequence info: %s"%str(info)
+        if info[0] == "mprage" or info[3].startswith("flash"):
             typelist.append(("mgz", ".mgz"))
         else:
             typelist.append(("niigz", ".nii.gz"))
     return typelist
     
+def get_img_name(subj, seq, ftype):
+    """Get the source file name"""    
+    return os.path.join(datadir, subj, "nifti/%s_seq_%02d.%s"%(args.type,int(seq),ftype))
+
 
 #====================#
 # Unpacking pipeline #
@@ -151,6 +182,7 @@ subjsource = pe.Node(interface=util.IdentityInterface(fields=["sid"]),
 dcminfo = pe.Node(interface=fs.ParseDICOMDir(sortbyrun=True,
                                              summarize=True),
                   name="dicominfo")
+dcminfo.overwrite = args.reparse
 
 dcmsource = pe.MapNode(interface=nio.DataGrabber(infields=["sid","dcmfile"],
                                                  outfields=["dicompath"]),
@@ -158,7 +190,7 @@ dcmsource = pe.MapNode(interface=nio.DataGrabber(infields=["sid","dcmfile"],
                        iterfield=["dcmfile"])
 
 dcmsource.inputs.base_directory = datadir
-dcmsource.inputs.template = "%s/%s/%s"
+dcmsource.inputs.template = "%s/%s/"+args.type+"/%s"
 dcmsource.inputs.template_args = dict(dicompath=[["sid","dicom","dcmfile"]])
 
 flfsource = pe.MapNode(interface=nio.DataGrabber(infields=["sid","seqn"],
@@ -167,7 +199,7 @@ flfsource = pe.MapNode(interface=nio.DataGrabber(infields=["sid","seqn"],
                        iterfield=["seqn"])
 
 flfsource.inputs.base_directory = datadir
-flfsource.inputs.template = "%s/unpack/flf/%s_seq%s"
+flfsource.inputs.template = "%s/unpack/flf/%s_"+args.type+"_seq%s"
 flfsource.inputs.template_args = dict(flfpath=[["sid","sid","seqn"]])
 
 nameimg = pe.MapNode(interface=util.IdentityInterface(fields=["outfile"]),
@@ -177,6 +209,7 @@ nameimg = pe.MapNode(interface=util.IdentityInterface(fields=["outfile"]),
 convert = pe.MapNode(interface=fs.MRIConvert(in_type="siemens_dicom"),
                      name="convertdicoms",
                      iterfield=["in_file", "sdcm_list", "out_type"])
+convert.overwrite = args.reconvert
 
 rename = pe.Node(interface=util.Merge(3, axis="hstack"), name="renameniftis")
 
@@ -215,7 +248,9 @@ unpack.connect(
      (subjsource, datasink,
         [("sid", "container")]),
      (rename, datasink,
-        [(("out", lambda x: [(l[0],l[1]+l[2][1]) for l in x]), "substitutions")]),
+        [(("out", lambda x: 
+            [("dicominfo.txt","%s-dicominfo.txt"%args.type)] + 
+                [(l[0],l[1]+l[2][1]) for l in x]), "substitutions")]),
      (convert, datasink,
         [("out_file", "nifti.@niifiles")]),
      (dcminfo, datasink,
@@ -232,26 +267,32 @@ unpack.config = dict(crashdump_dir=crashdir)
 
 # Run the pipeline
 if args.run:
+    timestamp = str(datetime.now())[:-10].replace("-","").replace(":","").replace(" ","-")
     unpack.run(inseries=args.inseries)
+    fulllog = open("/mindhive/gablab/fluid/NiPype_Code/log_archive/unpack-%s.log"%timestamp,"w")
+    for lf in ["pypeline.log%s"%n for n in [".4",".3",".2",".1",""]]:
+        if os.path.isfile(lf):
+            fulllog.write(open(lf).read())
+            os.remove(lf)
+    fulllog.close()
     unpack.write_graph(graph2use="flat")
 
 #========================#
 # Softlink heuristically #
 #========================#
 
-def get_nii_name(subj, seq):
-    """Get the source file name"""    
-    return os.path.join(datadir, subj, "nifti/seq_%02d.nii.gz"%int(seq))
-
 for subj in subjects:
-    infofile = os.path.join(datadir, subj, "unpack/dicominfo.txt")
+    infofile = os.path.join(datadir, subj, "unpack/%s-dicominfo.txt"%args.type)
+    if args.debug:
+        print "Parsing %s for linking"%infofile
     if os.path.isfile(infofile) and args.link:
         info = parse_info_file(infofile, writeflf=False)
         boldhash = dict(IQ=1,NBack=1,RT=1)
         for seq in info:
-            src = get_nii_name(subj, seq[2])
+            if args.debug:
+                print "Sequence info: %s"%str(seq)
             if seq[0]=="mprage":
-                src = src.replace("nii.gz", "mgz")
+                src = get_img_name(subj, seq[2], "mgz")
                 trg = os.path.join(datadir, subj, "mri/orig/001.mgz")
             else:
                 type = seq[0]
@@ -259,17 +300,22 @@ for subj in subjects:
                 trgdir = os.path.join(datadir, subj, type)
                 if type == "structural":
                     if name == "ep2d_t1w":
+                        src = get_img_name(subj, seq[2], "nii.gz")
                         trgfile = name + ".nii.gz"
                     elif name.startswith("T1_MPRAGE"):
+                        src = get_img_name(subj, seq[2], "nii.gz")
                         trgfile = "mprage.nii.gz"
-                    elif name.startswith("gre_mgh_multiecho"):
-                        deg = name.replace("gre_mgh_multiecho","").replace("_8e_ipat2x2","eg")
-                        trgfile = "flash%s.nii.gz"%deg
+                    elif name.startswith("flash"):
+                        src = get_img_name(subj, seq[2], "mgz")
+                        trgfile = "%s.mgz"%name
                 elif type == "bold":
-                    par = name.split("_")[0]
-                    nrun = boldhash[par]
-                    boldhash[par] += 1
-                    trgfile = "%s_run%d.nii.gz"%(par,nrun)
+                    src = get_img_name(subj, seq[2], "nii.gz")
+                    if name == "Resting":
+                        trgfile = "Resting.nii.gz"
+                    else:
+                        par = name.split("_")[0]
+                        nrun = boldhash[par]
+                        boldhash[par] += 1
                 else:
                     pass
                 trg = os.path.join(trgdir, trgfile)
@@ -280,6 +326,8 @@ for subj in subjects:
                     trgdir = os.path.split(trg)[0]
                     if not os.path.isdir(trgdir):
                         os.makedirs(trgdir)
+                    if args.debug:
+                        print "Linking %s to %s"%(src, trg)
                     os.symlink(src, trg)
                 else:
                     print "Target file %s exists; use -relink to overwrite"%trg
@@ -289,7 +337,7 @@ for subj in subjects:
         print "Info file %s not found"%infofile
 
 #=================#
-# Start recon-all
+# Start recon-all #
 #=================#
 if args.recon:
     for subj in subjects:
