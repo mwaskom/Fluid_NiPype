@@ -13,7 +13,7 @@ infosource = pe.Node(interface=util.IdentityInterface(fields=["subject_id"]),
 
 
 datasource = pe.Node(interface=nio.DataGrabber(infields=["subject_id"],
-                                               outfields=["func", "target", "struct"],
+                                               outfields=["func", "struct"],
                                                base_directory = data_dir),
                      name="datasource")
 
