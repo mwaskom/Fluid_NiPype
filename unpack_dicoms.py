@@ -56,10 +56,12 @@ subjectinfo = {}
 if args.subjects:
     subjects = args.subjects
 elif args.all:
-    subject_dirs = glob(os.path.join(datadir, subject_template, "dicom", args.type))
-    subjects = [d.split("/")[-2] for d in subject_dirs]
+    subject_dirs = glob(os.path.join(datadir,subject_template,"dicom",args.type))
+    subjects = [d.split("/")[-3] for d in subject_dirs]
 else:
     sys.exit("\nMust use either -subjects or -all")
+if args.debug:
+    print "Subjects: " + " ".join(subjects)
 
 #====================#
 # Pipeline functions #
@@ -78,6 +80,20 @@ def is_moco(dcmfile):
     stdout, stderr = proc.communicate()
     return stdout.strip().startswith('MoCoSeries')
 
+def fieldmap_type(dcmfile):
+    """Determine the type of a fieldmapping dicom"""
+    cmd = ["mri_probedicom", "--i", dcmfile, "--t", "8", "8"]
+    proc = subprocess.Popen(cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE)
+    stdout, stderr = proc.communicate()
+    if stdout.strip()[-4] == "M":
+        return "mag"
+    elif stdout.strip()[-4] == "P":
+        return "phase"
+    else:
+        raise Exception("Could not determine fieldmap type of %s"%dcmfile)
+
 def parse_info_file(dcminfofile, writeflf=True):
     """Get information from the dicom info file about the runs"""
     infopath = dcminfofile.split("/")
@@ -88,12 +104,16 @@ def parse_info_file(dcminfofile, writeflf=True):
     
     try:
         info = subjectinfo[subject]
+        if args.debug:
+            print "Using cached info list"
     except KeyError:
         seqfile = np.genfromtxt(dcminfofile, dtype=object)
         info = []
         # Parse by line
         for l in seqfile:
             seqn = l[2]
+            if args.debug:
+               print "Sequence info:\n\t%s"%(" ".join(l))
             if not args.dontunpack or not seqn in args.dontunpack:
                 name = l[12]
                 dcmfile = l[1]
@@ -106,29 +126,46 @@ def parse_info_file(dcminfofile, writeflf=True):
                     angle = name[18:-12]
                     info.append(("structural",dcmfile,seqn, "flash_%02d"%int(angle)))
                 elif name == "ep2d_t1w":
-                    info.append(("structural",dcmfile,seqn, name))
-                elif not is_moco(os.path.join(datadir,subject,"dicom",args.type,dcmfile)):
+                    if args.type == "full":
+                        pfix = "func"
+                    else:
+                        pfix = args.type
+                    info.append(("structural",dcmfile,seqn, "%s-%s"%(pfix,name)))
+                elif name.startswith("field_mapping"):
+                    fmaptype = fieldmap_type(
+                        os.path.join(datadir,subject,"dicom",args.type,dcmfile))
+                    if name == "field_mapping":
+                        seqname = "func_%s_fm"%fmaptype
+                    else:
+                        seqname = name.replace("field_mapping_","").lower() + "_%s_fm"%fmaptype
+                    info.append(("fieldmaps",dcmfile,seqn,seqname))
+                elif (t==70) and name.startswith("DIFFUSION"):
+                    info.append(("dwi",dcmfile,seqn,"diffusion"))
+                elif ("ge_func" in name
+                      and not is_moco(os.path.join(datadir,subject,"dicom",args.type,dcmfile))):
                     if (t==198) and name.startswith("NBack"):
-                        info.append(("bold",dcmfile,seqn, name))
+                        info.append(("bold",dcmfile,seqn,name))
                     elif (t==208) and name.startswith("RT_ge_func"):
-                        info.append(("bold",dcmfile,seqn, name))
+                        info.append(("bold",dcmfile,seqn,name))
                     elif (t==244) and name.startswith("IQ_ge_func"):
-                        info.append(("bold",dcmfile,seqn, name))
+                        info.append(("bold",dcmfile,seqn,name))
                     elif (t==62) and name.endswith("Resting"):
                         info.append(("bold",dcmfile,seqn,"Resting"))
                 elif (args.moco
+                      and "ge_func" in name
                       and is_moco(os.path.join(datadir,subject,"dicom",args.type,dcmfile))):
                     name = name.split("_")[0] + "-moco"
                     if (t==198) and name.startswith("NBack"):
-                        info.append(("bold",dcmfile,seqn, name))
+                        info.append(("bold",dcmfile,seqn,name))
                     elif (t==208) and name.startswith("RT_ge_func"):
-                        info.append(("bold",dcmfile,seqn, name))
+                        info.append(("bold",dcmfile,seqn,name))
                     elif (t==244) and name.startswith("IQ_ge_func"):
-                        info.append(("bold",dcmfile,seqn, name))
+                        info.append(("bold",dcmfile,seqn,name))
                     elif (t==62) and name.endswith("Resting"):
                         info.append(("bold",dcmfile,seqn,"Resting"))
                 else:
-                    pass
+                    if args.debug:
+                        print "***Skipping sequence***"
         subjectinfo[subject] = info
 
     # Write files containing lists of the dicoms in each series to speed up mri_convert
@@ -268,7 +305,10 @@ unpack.config = dict(crashdump_dir=crashdir)
 # Run the pipeline
 if args.run:
     unpack.run(inseries=args.inseries)
-    fulllog = open("/mindhive/gablab/fluid/NiPype_Code/log_archive/%s/unpack.log"%datestamp,"w")
+    logdir = "/mindhive/gablab/fluid/NiPype_Code/log_archive/%s"%datestamp
+    if not os.path.isdir(logdir):
+        os.mkdir(logdir)
+    fulllog = open("%s/unpack.log"%logdir,"w")
     for lf in ["pypeline.log%s"%n for n in [".4",".3",".2",".1",""]]:
         if os.path.isfile(lf):
             fulllog.write(open(lf).read())
@@ -284,7 +324,7 @@ for subj in subjects:
     infofile = os.path.join(datadir, subj, "unpack/%s-dicominfo.txt"%args.type)
     if args.debug:
         print "Parsing %s for linking"%infofile
-    if os.path.isfile(infofile) and args.link:
+    if os.path.exists(infofile) and args.link:
         info = parse_info_file(infofile, writeflf=False)
         boldhash = dict(IQ=1,NBack=1,RT=1)
         for seq in info:
@@ -295,33 +335,46 @@ for subj in subjects:
                 trg = os.path.join(datadir, subj, "mri/orig/001.mgz")
             else:
                 type = seq[0]
+                dcmfile = seq[1]
+                seqn = seq[2]
                 name = seq[3]
                 trgdir = os.path.join(datadir, subj, type)
                 if type == "structural":
-                    if name == "ep2d_t1w":
-                        src = get_img_name(subj, seq[2], "nii.gz")
+                    if name.endswith("ep2d_t1w"):
+                        src = get_img_name(subj, seqn, "nii.gz")
                         trgfile = name + ".nii.gz"
                     elif name.startswith("T1_MPRAGE"):
-                        src = get_img_name(subj, seq[2], "nii.gz")
+                        src = get_img_name(subj, seqn, "nii.gz")
                         trgfile = "mprage.nii.gz"
                     elif name.startswith("flash"):
-                        src = get_img_name(subj, seq[2], "mgz")
+                        src = get_img_name(subj, seqn, "mgz")
                         trgfile = "%s.mgz"%name
                 elif type == "bold":
-                    src = get_img_name(subj, seq[2], "nii.gz")
+                    src = get_img_name(subj, seqn, "nii.gz")
+                    if is_moco(dcmfile):
+                        moco = "moco"
+                    else:
+                        moco = ""
                     if name == "Resting":
-                        trgfile = "Resting.nii.gz"
+                        trgfile = "Resting%s.nii.gz"%moco
                     else:
                         par = name.split("_")[0]
                         nrun = boldhash[par]
                         boldhash[par] += 1
+                        trgfile = "%s_run%d%s.nii.gz"%(par,nrun,moco)
+                elif type == "dwi":
+                    src = get_img_name(subj, seqn, "nii.gz")
+                    trgfile = "%s.nii.gz"%name
+                elif type == "fieldmaps":
+                    src = get_img_name(subj, seqn, "nii.gz")
+                    trgfile = "%s.nii.gz"%name
                 else:
                     pass
                 trg = os.path.join(trgdir, trgfile)
-            if os.path.isfile(src):
-                if os.path.isfile(trg) and args.relink:
+            if os.path.exists(src):
+                if os.path.lexists(trg) and args.relink:
                     os.remove(trg)
-                if not os.path.isfile(trg):
+                if not os.path.lexists(trg):
                     trgdir = os.path.split(trg)[0]
                     if not os.path.isdir(trgdir):
                         os.makedirs(trgdir)
