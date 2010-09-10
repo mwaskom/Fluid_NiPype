@@ -149,7 +149,7 @@ Mask the functional runs with the extracted mask
 
 maskfunc = pe.MapNode(interface=fsl.ImageMaths(suffix="_bet",
                                                op_string="-mas"),
-                      iterfield=["in_file", "mask_file"],
+                      iterfield=["in_file", "in_file2"],
                       name = "maskfunc")
 preproc.connect(motion_correct, "out_file", maskfunc, "in_file")
 preproc.connect(meanfuncmask, "mask_file", maskfunc, "in_file2")
@@ -215,12 +215,13 @@ images in the functional series are outliers based on deviations in
 intensity and/or movement.
 """
 
-art = pe.Node(interface=ra.ArtifactDetect(use_differences = [True, False],
-                                          use_norm = True,
-                                          zintensity_threshold = 3,
-                                          norm_threshold = 1,
-                                          parameter_source = "FSL",
-                                          mask_type = "file"),
+art = pe.MapNode(interface=ra.ArtifactDetect(use_differences = [True, False],
+                                             use_norm = True,
+                                             zintensity_threshold = 3,
+                                             norm_threshold = 1,
+                                             parameter_source = "FSL",
+                                             mask_type = "file"),
+              iterfield=["realignment_parameters","realigned_files","mask_file"],
               name="art")
 
 
@@ -281,7 +282,7 @@ Use Freesurfer's vol/surf smoothing to smooth the images for surface analysis
 """
 
 surfsmooth = pe.MapNode(interface=fs.Smooth(proj_frac_avg=(0,1,0.1)),
-                        iterfield=["in_file"],
+                        iterfield=["in_file","reg_file"],
                         name="surfsmooth")
 
 preproc.connect(maskfunc2, "out_file", surfsmooth, "in_file")
@@ -294,7 +295,7 @@ Mask the smoothed data with the dilated mask
 
 volmaskfunc3 = pe.MapNode(interface=fsl.ImageMaths(suffix="_mask",
                                                 op_string="-mas"),
-                      iterfield=["in_file"],
+                      iterfield=["in_file","in_file2"],
                       name="volmaskfunc3")
 preproc.connect(volsmooth, "smoothed_file", volmaskfunc3, "in_file")
 preproc.connect(dilatemask, "out_file", volmaskfunc3, "in_file2")
@@ -316,19 +317,19 @@ preproc.connect(medianval, ("out_stat", getmeanscale), volmeanscale, "op_string"
 surfmeanscale = pe.MapNode(interface=fsl.ImageMaths(suffix="_gms"),
                            iterfield=["in_file","op_string"],
                            name="surfmeanscale")
-preproc.connect(surfsmooth, "smoothed_file", surfmeanscale, "op_string")
+preproc.connect(surfsmooth, "smoothed_file", surfmeanscale, "in_file")
 preproc.connect(medianval, ("out_stat", getmeanscale), surfmeanscale, "op_string")
 
 """
 Perform temporal highpass filtering on the data
 """
 
-volhighpass = pe.MapNode(interface=fsl.ImageMaths(suffix="_tempfilt"),
+volhighpass = pe.MapNode(interface=fsl.ImageMaths(suffix="_hpf"),
                          iterfield=["in_file"],
                          name="volhighpass")
 preproc.connect(volmeanscale, "out_file", volhighpass, "in_file")
 
-surfhighpass = pe.MapNode(interface=fsl.ImageMaths(suffix="_tempfilt"),
+surfhighpass = pe.MapNode(interface=fsl.ImageMaths(suffix="_hpf"),
                           iterfield=["in_file"],
                           name="surfhighpass")
 preproc.connect(surfmeanscale, "out_file", surfhighpass, "in_file")
