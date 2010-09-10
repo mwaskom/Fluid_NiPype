@@ -308,7 +308,8 @@ if args.run:
     logdir = "/mindhive/gablab/fluid/NiPype_Code/log_archive/%s"%datestamp
     if not os.path.isdir(logdir):
         os.mkdir(logdir)
-    fulllog = open("%s/unpack.log"%logdir,"w")
+    timestamp = str(datetime.now())[11:16].replace(":","-")
+    fulllog = open("%s/unpack_%s.log"%(logdir,timestamp),"w")
     for lf in ["pypeline.log%s"%n for n in [".4",".3",".2",".1",""]]:
         if os.path.isfile(lf):
             fulllog.write(open(lf).read())
