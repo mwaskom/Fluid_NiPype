@@ -8,9 +8,11 @@ import sys
 import nipype.interfaces.io as nio       
 import nipype.interfaces.fsl as fsl       
 import nipype.interfaces.freesurfer as fs
+import nipype.interfaces.spm as spm
 import nipype.interfaces.utility as util   
 import nipype.pipeline.engine as pe         
 import nipype.algorithms.rapidart as ra      
+import nipype.algorithms.modelgen as model
 import nibabel
 
 
@@ -133,6 +135,42 @@ preproc.connect(meanmean, "concatenated_file", surfreg, "source_file")
 preproc.connect(inputnode, "subject_id", surfreg, "subject_id")
 
 """
+Get the brainmask produced be recon-all
+"""
+
+fssource = pe.Node(interface=nio.FreeSurferSource(), name="fssource")
+
+preproc.connect(inputnode, "subject_id", fssource, "subject_id")
+
+"""
+Invert the surfreg transform to put the brainmask into functional space
+"""
+
+maskxfm = pe.Node(interface=fs.ApplyVolTransform(inverse=True),
+                  name="maskxfm")
+
+preproc.connect([(fssource, maskxfm, [("brainmask", "target_file")]),
+                 (meanmean, maskxfm, [("concatenated_file", "source_file")]),
+                 (surfreg, maskxfm, [("out_reg_file", "reg_file")])
+                 ])
+
+"""
+Binarize the brainmask in functional space
+"""
+
+threshmask = pe.Node(interface=fs.Binarize(min=10), name = "threshmask")
+
+preproc.connect(maskxfm, "transformed_file", threshmask, "in_file")
+
+"""
+Convert the mask to nifti so FSL tools can read it
+"""
+
+mask2nii = pe.Node(interface=fs.MRIConvert(out_type="niigz"), name="mask2nii")
+
+preproc.connect(threshmask, "binary_file", mask2nii, "in_file")
+
+"""
 Strip the skull from the mean functional from each run
 """
 
@@ -221,8 +259,8 @@ art = pe.MapNode(interface=ra.ArtifactDetect(use_differences = [True, False],
                                              norm_threshold = 1,
                                              parameter_source = "FSL",
                                              mask_type = "file"),
-              iterfield=["realignment_parameters","realigned_files","mask_file"],
-              name="art")
+                 iterfield=["realignment_parameters","realigned_files","mask_file"],
+                 name="art")
 
 
 preproc.connect([(motion_correct, art, [("par_file","realignment_parameters")]),
@@ -324,13 +362,44 @@ preproc.connect(medianval, ("out_stat", getmeanscale), surfmeanscale, "op_string
 Perform temporal highpass filtering on the data
 """
 
-volhighpass = pe.MapNode(interface=fsl.ImageMaths(suffix="_hpf"),
+volhighpass = pe.MapNode(interface=fsl.ImageMaths(suffix="_vol_hpf"),
                          iterfield=["in_file"],
                          name="volhighpass")
 preproc.connect(volmeanscale, "out_file", volhighpass, "in_file")
 
-surfhighpass = pe.MapNode(interface=fsl.ImageMaths(suffix="_hpf"),
+surfhighpass = pe.MapNode(interface=fsl.ImageMaths(suffix="_surf_hpf"),
                           iterfield=["in_file"],
                           name="surfhighpass")
 preproc.connect(surfmeanscale, "out_file", surfhighpass, "in_file")
+
+"""
+Use ART to find stimulus correlated motion
+"""
+
+unzip = pe.MapNode(interface=fs.MRIConvert(out_type="nii"),
+                   iterfield=["in_file"],
+                   name="unzipforart")
+
+preproc.connect(volhighpass, "out_file", unzip, "in_file")
+
+artspec = pe.Node(interface=model.SpecifyModel(concatenate_runs=False),
+                  name="artspec")
+
+preproc.connect(unzip, "out_file", artspec, "functional_runs")
+
+artdesign = pe.Node(interface=spm.Level1Design(), 
+                    name="artdesign")
+
+preproc.connect(artspec, "session_info", artdesign, "session_info")
+
+stimcorr = pe.Node(interface=ra.StimulusCorrelation(concatenated_design=False),
+                   name="stimcorr")
+
+preproc.connect(artdesign, "spm_mat_file", stimcorr, "spm_mat_file")
+
+preproc.connect([
+    (motion_correct, artspec, [("par_file", "realignment_parameters")]),
+    (art, artspec, [("outlier_files", "outlier_files")]),
+    (art, stimcorr, [("intensity_files", "intensity_values")]),
+    ])
 
