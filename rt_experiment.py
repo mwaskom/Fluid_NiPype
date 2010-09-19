@@ -4,8 +4,7 @@
 import re
 
 template_args = dict(func=[["subject_id", "bold", ["RT_run1", "RT_run2"]]],
-                     target=[["subject_id", "structural", "ep2d_t1w"]],
-                    struct=[["subject_id", "structural", "mprage"]])
+                     struct=[["subject_id", "structural", "mprage"]])
 
 source_template = "%s/%s/%s.nii.gz"
 

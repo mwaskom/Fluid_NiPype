@@ -50,7 +50,7 @@ def sub(origpath, subname, addrun=True):
         origpath = [origpath]
     _, name, ext = split_filename(subname)
     if addrun:
-        return [(os.path.split(path)[1], name+"_run_%d"%(i+1)+ext)
+        return [(os.path.basename(path), name+"_run_%d"%(i+1)+ext)
                     for i, path in enumerate(origpath)]
     else:
-        return [(os.path.split(path)[1], subname) for path in origpath]
+        return [(os.path.basename(path), subname) for path in origpath]
