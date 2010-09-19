@@ -19,12 +19,10 @@ Use :class:`nipype.interfaces.fsl.Merge` to merge the copes and
 varcopes for each condition
 """
 
-copemerge    = pe.MapNode(interface=fsl.Merge(dimension='t'),
-                       iterfield=['in_files'],
+copemerge    = pe.Node(interface=fsl.Merge(dimension='t'),
                        name="copemerge")
 
-varcopemerge = pe.MapNode(interface=fsl.Merge(dimension='t'),
-                       iterfield=['in_files'],
+varcopemerge = pe.Node(interface=fsl.Merge(dimension='t'),
                        name="varcopemerge")
 
 """
@@ -39,25 +37,22 @@ level2model = pe.Node(interface=fsl.L2Model(),
 Use :class:`nipype.interfaces.fsl.FLAMEO` to estimate a second level model
 """
 
-flameo = pe.MapNode(interface=fsl.FLAMEO(run_mode='fe'), name="flameo",
-                    iterfield=['cope_file','var_cope_file'])
+flameo = pe.Node(interface=fsl.FLAMEO(run_mode='fe'), name="flameo")
 
-overlayflame = pe.MapNode(interface=fsl.Overlay(stat_thresh=(2.5, 10),
+overlayflame = pe.Node(interface=fsl.Overlay(stat_thresh=(2.5, 10),
                                                 auto_thresh_bg=True,
                                                 show_negative_stats=True),
-                          name='overlayflame',
-                          iterfield = ['stat_image'])
+                          name='overlayflame')
 
-sliceflame = pe.MapNode(interface=fsl.Slicer(all_axial=True,
+sliceflame = pe.Node(interface=fsl.Slicer(all_axial=True,
                                              image_width=750),
-                        name='sliceflame',
-                        iterfield=['in_file'])
+                        name='sliceflame')
 
 """
 Connect the nodes in the volume workflow
 """
 
-vol_fixed_fx = pe.Workflow(name='vol_fixedfx')
+vol_fixed_fx = pe.Workflow(name='vol_fixed_fx')
 
 vol_fixed_fx.connect([(copemerge,flameo,[('merged_file','cope_file')]),
                       (varcopemerge,flameo,[('merged_file','var_cope_file')]),
