@@ -11,9 +11,8 @@ import nipype.pipeline.engine as pe
 First level model workflow in the volume
 """
 
-
-modelspec = pe.Node(interface=model.SpecifyModel(),  name="modelspec")
-modelspec.inputs.concatenate_runs = False
+modelspec = pe.Node(interface=model.SpecifyModel(concatenate_runs=False),
+                    name="modelspec")
 
 level1design = pe.Node(interface=fsl.Level1Design(), name="level1design")
 
@@ -21,12 +20,6 @@ modelgen = pe.MapNode(interface=fsl.FEATModel(), name="modelgen",
                       iterfield = ["fsf_file"])
 
 modelgen.overwrite = False
-
-artdesign = pe.Node(interface=spm.Level1Design(), 
-                    name="artdesign")
-
-stimcorr = pe.Node(interface=art.StimulusCorrelation(concatenated_design=False),
-                      name="stimcorr")
 
 modelestimate = pe.MapNode(interface=fsl.FILMGLS(smooth_autocorr=True,
                                                  mask_size=5,
@@ -85,14 +78,18 @@ Connect all of the nodes in a volume workflow
 
 fsl_vol_model = pe.Workflow(name="fsl_vol_model")
 
+def con_sort(files):
+    files.sort()
+    return files
+
 fsl_vol_model.connect([
    (modelspec,level1design,[("session_info","session_info")]),
-   (modelspec,artdesign,[("session_info","session_info")]),
-   (artdesign,stimcorr,[("spm_mat_file","spm_mat_file")]),
    (level1design,modelgen,[("fsf_files","fsf_file")]),
    (modelgen,modelestimate,[("design_file","design_file")]),
    (modelgen,contrastestimate,[("con_file","tcon_file")]),
-   (contrastestimate,mergecontrast,[("copes","in1"),("varcopes","in2"),("zstats","in3")]),
+   (contrastestimate,mergecontrast,[(("copes", con_sort), "in1"),
+                                    (("varcopes", con_sort), "in2"),
+                                    (("zstats", con_sort), "in3")]),
    (mergecontrast,selectcontrast,[("out","inlist")]),
    (selectcontrast,xfmcopes,[(("out",lambda x: [l[0] for l in x]),"source_file")]),
    (selectcontrast,xfmvarcopes,[(("out",lambda x: [l[1] for l in x]),"source_file")]),
