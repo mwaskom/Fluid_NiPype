@@ -75,9 +75,12 @@ firstlevel = pe.Workflow(name= "level1")
 infosource.iterables = ("subject_id", subject_list)
 
 """ Add experiment-sepcific information to the workflows """
+preproc.inputs.fssource.subjects_dir = "/mindhive/gablab/fluid/Data"
+
 highpass_opstring = "-bptf %s -1" % (exp.hpcutoff/exp.TR)
 preproc.inputs.volhighpass.op_string = highpass_opstring
 preproc.inputs.surfhighpass.op_string = highpass_opstring
+
 
 surfsmoothvalnode = preproc.get_node("surfsmoothval")
 #surfsmoothvalnode.iterables = ("surface_fwhm", [0.,5.])
@@ -88,12 +91,19 @@ preproc.inputs.volsmoothval.fwhm = 5.
 firstlevel.connect([(infosource, datasource, 
                         [("subject_id", "subject_id")]),
                     (infosource, preproc,
-                        [("subject_id", "inputspec.subject_id")]),
+                        [("subject_id", "inputspec.subject_id"),
+                         ("subject_id", "artspec.subject_id"),
+                         (("subject_id", fuf.subjectinfo, exp), "artspec.subject_info")]),
                     (datasource, preproc, 
                         [("func", "inputspec.func")])
-                   ])
+                    ])
 
 contrasts = exp.contrasts
+
+preproc.inputs.artspec.time_repetition = exp.TR
+preproc.inputs.artspec.high_pass_filter_cutoff = exp.hpcutoff
+preproc.inputs.artspec.input_units = exp.units
+preproc.inputs.artspec.output_units = exp.units
 
 fsl_vol_model.inputs.modelspec.time_repetition = exp.TR
 fsl_vol_model.inputs.modelspec.high_pass_filter_cutoff = exp.hpcutoff
@@ -124,14 +134,9 @@ firstlevel.connect([
     (infosource, fsl_vol_model, 
         [(("subject_id", fuf.subjectinfo, exp), "modelspec.subject_info"),
          ("subject_id", "modelspec.subject_id")]),
-    (infosource, fsl_surf_model, 
-        [(("subject_id", fuf.subjectinfo, exp), "modelspec.subject_info"),
-         ("subject_id", "modelspec.subject_id")]),
     (preproc, fsl_vol_model, 
         [("volhighpass.out_file", "modelspec.functional_runs"),
          ("art.outlier_files", "modelspec.outlier_files"),
-         ("art.intensity_files", "stimcorr.intensity_values"),
-         ("realign.par_file", "stimcorr.realignment_parameters"),
          ("realign.par_file", "modelspec.realignment_parameters"),
          ("volhighpass.out_file","modelestimate.in_file"),
          (("meanfunc2.out_file", lambda x: x[0]),"overlaystats.background_image"),
@@ -139,11 +144,12 @@ firstlevel.connect([
          ("reg2struct.out_reg_file", "xfmcopes.reg_file"),
          ("reg2struct.out_reg_file", "xfmvarcopes.reg_file"),
         ]),
+    (infosource, fsl_surf_model, 
+        [(("subject_id", fuf.subjectinfo, exp), "modelspec.subject_info"),
+         ("subject_id", "modelspec.subject_id")]),
     (preproc, fsl_surf_model, 
         [("surfhighpass.out_file", "modelspec.functional_runs"),
          ("art.outlier_files", "modelspec.outlier_files"),
-         ("art.intensity_files", "stimcorr.intensity_values"),
-         ("realign.par_file", "stimcorr.realignment_parameters"),
          ("realign.par_file", "modelspec.realignment_parameters"),
          ("surfhighpass.out_file","modelestimate.in_file"),
          (("meanfunc2.out_file", lambda x: x[0]),"overlaystats.background_image"),
@@ -177,19 +183,19 @@ if args.runspm:
 if exp.nruns > 1:
     firstlevel.connect(
         [(preproc, vol_fixed_fx, 
-           [("dilatemask.out_file", "flameo.mask_file"),
-           (("meanfunc2.out_file", lambda x: x[0]), "overlayflame.background_image")]),
+           [("mask2nii.out_file", "flameo.mask_file"),
+            ("meanmean.concatenated_file", "overlayflame.background_image")]),
          (fsl_vol_model, vol_fixed_fx,
-           [(("xfmcopes.transformed_file", fuf.sort_copes),"copemerge.in_files"),
-            (("xfmvarcopes.transformed_file", fuf.sort_copes),"varcopemerge.in_files"),
-            (("contrastestimate.copes", lambda x: len(x)),"l2model.num_copes")]),
+           [("xfmcopes.transformed_file","copemerge.in_files"),
+            ("xfmvarcopes.transformed_file", "varcopemerge.in_files"),
+            (("xfmcopes.transformed_file", lambda x: len(x)), "l2model.num_copes")]),
          (preproc, surf_fixed_fx, 
-           [("dilatemask.out_file", "flameo.mask_file"),
-           (("meanfunc2.out_file", lambda x: x[0]), "overlayflame.background_image")]),
+           [("mask2nii.out_file", "flameo.mask_file"),
+           ("meanmean.concatenated_file", "overlayflame.background_image")]),
          (fsl_surf_model, surf_fixed_fx,
-           [(("xfmcopes.transformed_file", fuf.sort_copes),"copemerge.in_files"),
-            (("xfmvarcopes.transformed_file", fuf.sort_copes),"varcopemerge.in_files"),
-            (("contrastestimate.copes", lambda x: len(x)),"l2model.num_copes")]),
+           [("xfmcopes.transformed_file","copemerge.in_files"),
+            ("xfmvarcopes.transformed_file","varcopemerge.in_files"),
+            (("xfmcopes.transformed_file", lambda x: len(x)),"l2model.num_copes")]),
         ])
 
 
@@ -213,28 +219,34 @@ datasink = pe.Node(interface=nio.DataSink(),
 datasink.inputs.base_directory = output_base
 datasink.overwrite = True
 
-reportsub = []
-imagesub = []
+l1reportsub = []
+l2reportsub = []
+sinksub = []
 
 for r in range(exp.nruns):
     runstr = "run_%d"%(r+1)
     for type in ["rotations","translations"]:
-        reportsub.append(("_plot_type_%s/_plotmotion%d"%(type,r),runstr))
-    imagesub.append(("_realign%d"%r,""))
-    reportsub.append(("_plotdisplacement%d"%r,runstr))
-    reportsub.append(("_modelgen%d"%r,runstr))
-    reportsub.append(("run%d"%r,"design"))
-    imagesub.append(("_modelestimate%d"%r,runstr))
-    reportsub.append(("_sliceresidual%d"%r,runstr))
-    imagesub.append(("_highpass%d"%r,""))
+        l1reportsub.append(("_plot_type_%s/_plotmotion%d"%(type,r),runstr))
+    sinksub.append(("_realign%d"%r,""))
+    l1reportsub.append(("_plotdisplacement%d"%r,runstr))
+    l1reportsub.append(("_modelgen%d"%r,runstr))
+    l1reportsub.append(("run%d"%r,"design"))
+    sinksub.append(("_modelestimate%d"%r,runstr))
+    l1reportsub.append(("_sliceresidual%d"%r,runstr))
+    sinksub.append(("_highpass%d"%r,""))
+    sinksub.append(("_art%d"%r,""))
+    sinksub.append(("_dilatemask%d"%r,""))
+    sinksub.append(("_volhighpass%d"%r,""))
+    sinksub.append(("_surfhighpass%d"%r,""))
 for con, conparams in enumerate(contrasts):
     for r in range(exp.nruns):
-        reportsub.append(("_index_%d/_slicestats%d/zstat%d_"%(con,r,con+1),
-                          "run_%d/%s_"%(r+1,conparams[0])))
-    reportsub.append(("_sliceflame%d/zstat1_"%con, "%s_"%conparams[0]))
-    imagesub.append(("_flameo%d"%con,"%s"%conparams[0]))
-reportsub.reverse()
-imagesub.reverse()
+        l1reportsub.append(("_index_%d/_slicestats%d/zstat%d_"%(con,r,con+1),
+                            "run_%d/%s_"%(r+1,conparams[0])))
+    l2reportsub.append(("_sliceflame%d/zstat1_"%con, "%s_"%conparams[0]))
+    sinksub.append(("_flameo%d"%con,"%s"%conparams[0]))
+l1reportsub.reverse()
+l2reportsub.reverse()
+sinksub.reverse()
 
 mergesubs = pe.Node(interface=util.Merge(numinputs=5),
                        name="mergesubstitutes")
@@ -244,67 +256,77 @@ firstlevel.connect([(preproc, mergesubs,
                         (("surfhighpass.out_file",fuf.sub,"preproc-surf_func.nii.gz"),"in2"),
                         (("art.outlier_files",fuf.sub,"outliers.txt"),"in3"),
                         (("realign.par_file",fuf.sub,"motion_params.par"),"in4"),
-                        (("dilatemask.out_file",fuf.sub,"func_mask.nii.gz",False),"in5")])
+                        (("dilatemask.out_file",fuf.sub,"func_mask.nii.gz"),"in5")])
                     ])
 
-report = pe.Node(interface=nio.DataSink(),
-                 name="report")
-report.inputs.base_directory = os.path.join(output_base, "report")
-report.inputs.substitutions = reportsub
-report.inputs.parameterization = True
-report.overwrite = True
+reportdir = os.path.join(output_base, "report")
+
+volreport = pe.Node(interface=nio.DataSink(base_directory=reportdir),
+                    overwrite=True,
+                    name="volreport")
+
+surfreport = pe.Node(interface=nio.DataSink(base_directory=reportdir),
+                     overwrite=True,
+                     name="surfreport")
 
 firstlevel.connect([(infosource, datasink, 
                         [("subject_id", "container"),
                          (("subject_id", lambda x: "_subject_id_%s"%x), "strip_dir")]),
-                    (mergesubs, datasink,
-                        [(("out", lambda x: imagesub + x), "substitutions")]),
+                    #(mergesubs, datasink,
+                        #[(("out", lambda x: sinksub + x), "substitutions")]),
                     (preproc, datasink,
-                        [("volhighpass.out_file", "preproc.@functional_runs"),
-                         ("surfhighpass.out_file", "preproc.@functional_runs"),
+                        [("volhighpass.out_file", "preproc.@vol_runs"),
+                         ("surfhighpass.out_file", "preproc.@surf_runs"),
                          ("art.outlier_files", "preproc.@outlier_files"),
                          ("realign.par_file", "preproc.@realign_parameters"),
                          ("dilatemask.out_file", "preproc.@func_mask")]),
                     (fsl_vol_model, datasink,
-                        [("modelestimate.results_dir", "level1.model.@results"),
-                         ("contrastestimate.tstats", "level1.contrasts.@T"),
-                         ("contrastestimate.zstats", "level1.contrasts.@Z"),
-                         ("contrastestimate.copes", "level1.contrasts.@copes"),
-                         ("contrastestimate.varcopes", "level1.contrasts.@varcopes")]),
+                        [("modelestimate.results_dir", "level1.volume.model.@results"),
+                         ("contrastestimate.tstats", "level1.volume.contrasts.@T"),
+                         ("contrastestimate.zstats", "level1.volume.contrasts.@Z"),
+                         ("contrastestimate.copes", "level1.volume.contrasts.@copes"),
+                         ("contrastestimate.varcopes", "level1.volume.contrasts.@varcopes")]),
                     (fsl_surf_model, datasink,
-                        [("modelestimate.results_dir", "level1.model.@results"),
-                         ("contrastestimate.tstats", "level1.contrasts.@T"),
-                         ("contrastestimate.zstats", "level1.contrasts.@Z"),
-                         ("contrastestimate.copes", "level1.contrasts.@copes"),
-                         ("contrastestimate.varcopes", "level1.contrasts.@varcopes")]),
-                    (infosource, report,
+                        [("modelestimate.results_dir", "level1.surface.model.@results"),
+                         ("contrastestimate.tstats", "level1.surface.contrasts.@T"),
+                         ("contrastestimate.zstats", "level1.surface.contrasts.@Z"),
+                         ("contrastestimate.copes", "level1.surface.contrasts.@copes"),
+                         ("contrastestimate.varcopes", "level1.surface.contrasts.@varcopes")]),
+                    (infosource, volreport,
                         [("subject_id", "container"),
                          (("subject_id", lambda x: "_subject_id_%s"%x), "strip_dir")]),
-                    (preproc, report,
+                    (infosource, volreport,
+                        [("subject_id", "container"),
+                         (("subject_id", lambda x: "_subject_id_%s"%x), "strip_dir")]),
+                    (preproc, volreport,
                         [("plotmotion.out_file", "preproc.@motionplots"),
                          ("plotdisplacement.out_file", "preproc.@displacementplots")]),
-                    (fsl_vol_model, report,
+                    (fsl_vol_model, volreport,
                         [("modelgen.design_image", "level1.@design"),
                          ("modelgen.design_cov", "level1.@covariance"),
-                         ("slicestats.out_file", "level1.@zstats"),
-                         ("sliceresidual.out_file", "level1.@sigmasquared")]),
-                    (fsl_surf_model, report,
-                        [("modelgen.design_image", "level1.@design"),
-                         ("modelgen.design_cov", "level1.@covariance"),
-                         ("slicestats.out_file", "level1.@zstats"),
-                         ("sliceresidual.out_file", "level1.@sigmasquared")]),
+                         ("slicestats.out_file", "level1.volume.@zstats"),
+                         ("sliceresidual.out_file", "level1.volume.@sigmasquared")]),
+                    (fsl_surf_model, surfreport,
+                        [("slicestats.out_file", "level1.surface.@zstats"),
+                         ("sliceresidual.out_file", "level1.surface.@sigmasquared")]),
                     ])
 if exp.nruns > 1:                    
-    firstlevel.connect([(vol_fixed_fx, datasink,
-                            [("flameo.stats_dir", "fixedfx.@zstats")]),
-                        (vol_fixed_fx, report,
-                            [("sliceflame.out_file", "fixedfx.@zstats")]),
+    firstlevel.connect([(infosource, volreport, 
+                            [("subject_id", "container"),
+                             (("subject_id", lambda x: "_subject_id_%s"%x), "strip_dir")]),
+                        (infosource, surfreport, 
+                            [("subject_id", "container"),
+                             (("subject_id", lambda x: "_subject_id_%s"%x), "strip_dir")]),
+                        (vol_fixed_fx, datasink,
+                            [("flameo.stats_dir", "fixedfx.volume.@stats")]),
+                        (vol_fixed_fx, volreport,
+                            [("sliceflame.out_file", "fixedfx.volume.@report")]),
                         (surf_fixed_fx, datasink,
-                            [("flameo.stats_dir", "fixedfx.@zstats")]),
-                        (surf_fixed_fx, report,
-                            [("sliceflame.out_file", "fixedfx.@zstats")]),
+                            [("flameo.stats_dir", "fixedfx.surface.@stats")]),
+                        (surf_fixed_fx, surfreport,
+                            [("sliceflame.out_file", "fixedfx.surface.@report")]),
                         ])
-if args.runspm:
+if args.runspm and 0:
     firstlevel.connect([(spm_modelfit, datasink,
                             [("contrastestimate.con_images","SPM.contrasts.@con"),
                              ("contrastestimate.spmT_images","SPM.contrasts.@T")])
@@ -313,6 +335,7 @@ if args.runspm:
 # Run the script
 if args.run:
     firstlevel.run(inseries=args.inseries)
+    # Archive the logfile
     logdir = "/mindhive/gablab/fluid/NiPype_Code/log_archive/%s"%datestamp
     if not os.path.isdir(logdir):
         os.mkdir(logdir)
