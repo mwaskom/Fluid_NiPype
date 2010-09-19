@@ -43,6 +43,8 @@ parser.add_argument("-relink", action="store_true",
 parser.add_argument("-inseries", action="store_true", 
                     help="force running nipype in series")
 parser.add_argument("-debug", action="store_true", help="turn on debugging")
+if len(sys.argv) < 3:
+    sys.argv.append("-h")
 args = parser.parse_args()
 
 # Hardcoded data directory and template
@@ -122,9 +124,6 @@ def parse_info_file(dcminfofile, writeflf=True):
                 if (s==176) and (t==1) and name.startswith("T1_MPRAGE"):
                     info.append(("structural",dcmfile,seqn, name))
                     info.append(("mprage",dcmfile,seqn, name))
-                elif (t==8) and name.startswith("gre_mgh_multiecho"):
-                    angle = name[18:-12]
-                    info.append(("structural",dcmfile,seqn, "flash_%02d"%int(angle)))
                 elif name == "ep2d_t1w":
                     if args.type == "full":
                         pfix = "func"
