@@ -18,7 +18,7 @@ import nipype.interfaces.freesurfer as fs
 import nipype.pipeline.engine as pe
 
 # Command line arguments
-parser = argparse.ArgumentParser(usage="unpack_dicoms.py [options]")
+parser = argparse.ArgumentParser(usage="unpack_dicoms.py -type scantype [options]")
 parser.add_argument("-subjects", nargs="*", metavar="subjid",
                     help="list of subject ids to unpack")
 parser.add_argument("-type", metavar="scantype", help="func, struct, or full")
@@ -44,7 +44,7 @@ parser.add_argument("-inseries", action="store_true",
                     help="force running nipype in series")
 parser.add_argument("-debug", action="store_true", help="turn on debugging")
 if len(sys.argv) < 3:
-    sys.argv.append("-h")
+    sys.argv.insert("-h",0)
 args = parser.parse_args()
 
 # Hardcoded data directory and template
