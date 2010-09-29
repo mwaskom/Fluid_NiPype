@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import shutil
+import argparse
 from copy import deepcopy
 from datetime import datetime
 
@@ -21,8 +22,6 @@ import nipype.interfaces.utility as util
 if (not pe.__file__.startswith("/software/python/nipype0.3") 
     and not pe.__file__.startswith("/u2/mwaskom/nipype")):
     sys.exit("ERROR: Not using nipype0.3")
-
-import argparse
 
 from fluid_preproc import preproc
 from fluid_fsl_model import fsl_vol_model, fsl_surf_model

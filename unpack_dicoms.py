@@ -18,7 +18,7 @@ import nipype.interfaces.freesurfer as fs
 import nipype.pipeline.engine as pe
 
 # Command line arguments
-parser = argparse.ArgumentParser(usage="unpack_dicoms.py -type scantype [options]")
+parser = argparse.ArgumentParser(usage="unpack_dicoms.py [options]")
 parser.add_argument("-subjects", nargs="*", metavar="subjid",
                     help="list of subject ids to unpack")
 parser.add_argument("-type", metavar="scantype", help="func, struct, or full")
@@ -43,13 +43,21 @@ parser.add_argument("-relink", action="store_true",
 parser.add_argument("-inseries", action="store_true", 
                     help="force running nipype in series")
 parser.add_argument("-debug", action="store_true", help="turn on debugging")
-if len(sys.argv) < 3:
-    sys.argv.insert("-h",0)
+
+# Display help if we got less than one argument
+if len(sys.argv) < 2:
+    sys.argv.insert(0,"-h")
 args = parser.parse_args()
 
 # Hardcoded data directory and template
 datadir = "/mindhive/gablab/fluid/Data/"
 subject_template = "gf*"
+
+# If type not specified, set to a null string
+# Dicom files will be expected to be in $subject/dicom
+# This should work, but I haven't actually tested it.
+if not args.type:
+    args.type = ""
 
 # Initialize the subjectinfo dict
 subjectinfo = {}
@@ -211,15 +219,18 @@ def get_img_name(subj, seq, ftype):
 # Unpacking pipeline #
 #====================#
 
+# Subject id iterable
 subjsource = pe.Node(interface=util.IdentityInterface(fields=["sid"]),
                      name='subjinfo',
                      iterables = ("sid", subjects))
 
+# Parse a dicom directory to get sequence information
 dcminfo = pe.Node(interface=fs.ParseDICOMDir(sortbyrun=True,
                                              summarize=True),
                   name="dicominfo")
 dcminfo.overwrite = args.reparse
 
+# DataGrabber for dicom images
 dcmsource = pe.MapNode(interface=nio.DataGrabber(infields=["sid","dcmfile"],
                                                  outfields=["dicompath"]),
                        name="dicomsource",
@@ -229,6 +240,7 @@ dcmsource.inputs.base_directory = datadir
 dcmsource.inputs.template = "%s/%s/"+args.type+"/%s"
 dcmsource.inputs.template_args = dict(dicompath=[["sid","dicom","dcmfile"]])
 
+# DataGrabber for filelist files
 flfsource = pe.MapNode(interface=nio.DataGrabber(infields=["sid","seqn"],
                                                  outfields=["flfpath"]),
                        name="flfsource",
@@ -238,24 +250,30 @@ flfsource.inputs.base_directory = datadir
 flfsource.inputs.template = "%s/unpack/flf/%s_"+args.type+"_seq%s"
 flfsource.inputs.template_args = dict(flfpath=[["sid","sid","seqn"]])
 
+# Dummy node to facilitate sensible naming
 nameimg = pe.MapNode(interface=util.IdentityInterface(fields=["outfile"]),
                      name="nameimage",
                      iterfield=["outfile"])
 
+# Use mri_convert to unpack the dicoms
 convert = pe.MapNode(interface=fs.MRIConvert(in_type="siemens_dicom"),
                      name="convertdicoms",
                      iterfield=["in_file", "sdcm_list", "out_type"])
 convert.overwrite = args.reconvert
 
+# Node to create a substitutions list
 rename = pe.Node(interface=util.Merge(3, axis="hstack"), name="renameniftis")
 
+# DataSink for the nifti/mgz files
 datasink = pe.Node(interface=nio.DataSink(),name="datasink")
 datasink.inputs.base_directory = datadir
 datasink.inputs.parameterization = False
 
+# Workflow definition
 unpack = pe.Workflow(name="unpackdicoms")
 unpack.base_dir = "/mindhive/gablab/fluid/Analysis/NiPype/workingdir/unpack"
 
+# Workflow connection
 unpack.connect(
     [(subjsource, dcminfo,
         [(("sid", get_dicom_dir), "dicom_dir")]),
@@ -304,6 +322,8 @@ unpack.config = dict(crashdump_dir=crashdir)
 # Run the pipeline
 if args.run:
     unpack.run(inseries=args.inseries)
+
+    # Log archiving
     logdir = "/mindhive/gablab/fluid/NiPype_Code/log_archive/%s"%datestamp
     if not os.path.isdir(logdir):
         os.mkdir(logdir)
@@ -314,6 +334,8 @@ if args.run:
             fulllog.write(open(lf).read())
             os.remove(lf)
     fulllog.close()
+    
+    # Write the pipeline graph
     unpack.write_graph(graph2use="flat")
 
 #========================#
@@ -321,24 +343,30 @@ if args.run:
 #========================#
 
 for subj in subjects:
+    # This file should be created by the pipeline above
     infofile = os.path.join(datadir, subj, "unpack/%s-dicominfo.txt"%args.type)
     if args.debug:
         print "Parsing %s for linking"%infofile
     if os.path.exists(infofile) and args.link:
+        # Get information about the sequences
         info = parse_info_file(infofile, writeflf=False)
+        # Hash dict to control names for multiple runs
         boldhash = dict(IQ=1,NBack=1,RT=1)
         for seq in info:
             if args.debug:
                 print "Sequence info: %s"%str(seq)
+            # This is the recon-all mprage souce
             if seq[0]=="mprage":
                 src = get_img_name(subj, seq[2], "mgz")
                 trg = os.path.join(datadir, subj, "mri/orig/001.mgz")
+            # Other images get linked here
             else:
                 type = seq[0]
                 dcmfile = seq[1]
                 seqn = seq[2]
                 name = seq[3]
                 trgdir = os.path.join(datadir, subj, type)
+                # Nifti mprage, low-res T1, and FLASH images
                 if type == "structural":
                     if name.endswith("ep2d_t1w"):
                         src = get_img_name(subj, seqn, "nii.gz")
@@ -346,9 +374,13 @@ for subj in subjects:
                     elif name.startswith("T1_MPRAGE"):
                         src = get_img_name(subj, seqn, "nii.gz")
                         trgfile = "mprage.nii.gz"
+                    # Our flashes are now converted elsewhere (they don't get added 
+                    # to the info list during a parse_info_file() call), but there was
+                    # no reason to delete the FLASH code as this block will never execute
                     elif name.startswith("flash"):
                         src = get_img_name(subj, seqn, "mgz")
                         trgfile = "%s.mgz"%name
+                # Functional runs
                 elif type == "bold":
                     src = get_img_name(subj, seqn, "nii.gz")
                     if is_moco(dcmfile):
@@ -362,9 +394,11 @@ for subj in subjects:
                         nrun = boldhash[par]
                         boldhash[par] += 1
                         trgfile = "%s_run%d%s.nii.gz"%(par,nrun,moco)
+                # Diffusion.  Not calling it DTI, to please Satra
                 elif type == "dwi":
                     src = get_img_name(subj, seqn, "nii.gz")
                     trgfile = "%s.nii.gz"%name
+                # Fieldmaps.  Both magnitude and phase series get unpacked
                 elif type == "fieldmaps":
                     src = get_img_name(subj, seqn, "nii.gz")
                     trgfile = "%s.nii.gz"%name
@@ -392,6 +426,10 @@ for subj in subjects:
 # Start recon-all #
 #=================#
 if args.recon:
+    # Can automatically submit a recon-all job to the Sun Grid Engine.
+    # This might only work on mindhive, I'm not 100% sure where it's 
+    # getting the environment info from, but it's not passed explicity.
+    # Probably best to have your subjects dir set correctly.
     for subj in subjects:
         # Make sure the source image exists
         if os.path.isfile(os.path.join(datadir, subj, "mri/orig/001.mgz")):

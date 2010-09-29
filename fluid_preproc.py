@@ -13,7 +13,7 @@ import nipype.interfaces.utility as util
 import nipype.pipeline.engine as pe         
 import nipype.algorithms.rapidart as ra      
 import nipype.algorithms.modelgen as model
-import nibabel
+import nibabel as nib
 
 
 preproc = pe.Workflow(name="preproc")
@@ -23,6 +23,7 @@ Set up a node to define all inputs required for the preprocessing workflow
 """
 
 inputnode = pe.Node(interface=util.IdentityInterface(fields=["func",
+                                                             "ep2d_t1w",
                                                              "subject_id"]),
                     name="inputspec")
 
@@ -42,15 +43,24 @@ preproc.connect(inputnode, "func", img2float, "in_file")
 Extract the middle volume of the first run as the reference
 """
 
-extract_ref = pe.MapNode(interface=fsl.ExtractROI(t_size=1,
-                                                  t_min=0),
+
+def getmiddlevolume(func):
+    """Return the middle volume index to use as a reference in MCFLIRT"""
+    funcfile = func
+    if isinstance(func, list):
+        funcfile = func[0]
+    _,_,_,timepoints = nib.load(funcfile).get_shape()
+    return (timepoints/2)-1
+
+extract_ref = pe.MapNode(interface=fsl.ExtractROI(t_size=1),
                          iterfield=["in_file"],
                          name = "extractref")
 
 preproc.connect(img2float, "out_file", extract_ref, "in_file")
+preproc.connect(inputnode, ("func", getmiddlevolume), extract_ref, "t_min")
 
 """
-Realign each functional run to the middle volume of the run
+Realign each functional run to the middle volume of that run
 """
 
 motion_correct = pe.MapNode(interface=fsl.MCFLIRT(save_mats = True,
@@ -91,8 +101,20 @@ meanfunc = pe.MapNode(interface=fsl.ImageMaths(op_string = "-Tmean",
 preproc.connect(motion_correct, "out_file", meanfunc, "in_file")
 
 """
-Generate linear registration matricies for each run to the structural image
+Generate linear registration matrices for each run to the t1-weighted EPI
 """
+
+reg2struct = pe.MapNode(fsl.FLIRT(),
+                        iterfield=["in_file"],
+                        name="reg2struct")
+
+preproc.connect(inputnode, "ep2d_t1w", reg2struct, "reference")
+preproc.connect(meanfunc, "out_file", reg2struct, "in_file")
+
+
+
+"""
+DEPRECATED
 
 reg2struct = pe.MapNode(interface=fs.BBRegister(contrast_type="t2",
                                                 init = "fsl"),
@@ -102,10 +124,6 @@ reg2struct = pe.MapNode(interface=fs.BBRegister(contrast_type="t2",
 preproc.connect(meanfunc, "out_file", reg2struct, "source_file")
 preproc.connect(inputnode, "subject_id", reg2struct, "subject_id")
 
-"""
-Apply this transformation to each mean image
-"""
-
 meanxfm = pe.MapNode(interface=fs.ApplyVolTransform(fs_target=True,
                                                     no_resample=True),
                      iterfield=["reg_file","source_file"],
@@ -113,19 +131,11 @@ meanxfm = pe.MapNode(interface=fs.ApplyVolTransform(fs_target=True,
 
 preproc.connect(meanfunc, "out_file", meanxfm, "source_file")
 preproc.connect(reg2struct, "out_reg_file", meanxfm, "reg_file")
-
-"""
-Take a mean of the transformed mean images
-"""
-
 meanmean = pe.Node(interface=fs.Concatenate(stats="mean"),
                    name="meanmean")
                    
 preproc.connect(meanxfm, "transformed_file", meanmean, "in_files")
 
-"""
-Register this mean mean image to the structural image for surface transforms
-"""
 
 surfreg = pe.Node(interface=fs.BBRegister(contrast_type="t2",
                                           init = "fsl"),
@@ -135,7 +145,19 @@ preproc.connect(meanmean, "concatenated_file", surfreg, "source_file")
 preproc.connect(inputnode, "subject_id", surfreg, "subject_id")
 
 """
-Get the brainmask produced be recon-all
+
+"""
+Register the t1 weighted target image to the original anatomical
+"""
+
+surfreg = pe.Node(fs.BBRegister(init="fsl", contrast_type="t1"),
+                  name="surfreg")
+
+preproc.connect(inputnode, "subject_id", surfreg, "subject_id")
+preproc.connect(inputnode, "ep2d_t1w", surfreg, "source_file")
+
+"""
+Get the brainmask produced by recon-all
 """
 
 fssource = pe.Node(interface=nio.FreeSurferSource(), name="fssource")
@@ -150,7 +172,7 @@ maskxfm = pe.Node(interface=fs.ApplyVolTransform(inverse=True),
                   name="maskxfm")
 
 preproc.connect([(fssource, maskxfm, [("brainmask", "target_file")]),
-                 (meanmean, maskxfm, [("concatenated_file", "source_file")]),
+                 (inputnode, maskxfm, [("ep2d_t1w", "source_file")]),
                  (surfreg, maskxfm, [("out_reg_file", "reg_file")])
                  ])
 
