@@ -54,7 +54,7 @@ def find_flash(sid):
     return info
 
 def get_dcm_substitutes(sid):
-    """Rename the output of a dicom pypeline sensibly."""
+    """Rename the output of a the dicom conversion pipeline sensibly."""
     infolist = find_flash(sid)
     subs = []
     for i, info in enumerate(infolist):
@@ -117,7 +117,7 @@ reg_pipe = pe.Workflow(name="registration_pipe",
 anglesource = pe.Node(util.IdentityInterface(fields=["alpha"]),name="anglesource")
 anglesource.iterables = ("alpha", [5, 20, 30])
 
-# Collect the FLASH images we just converted from the Data directory
+# Collect FLASH images in compressed mgh format from the Data directory
 flashgrabber = pe.Node(nio.DataGrabber(infields=["alpha","sid"],outfields=["flash_files"]),
                           name="flashgrabber")
 
@@ -172,9 +172,9 @@ reg_pipe.connect([(sidsource, xfmsink, [("sid", "container"),
 
 
 # Parameter Estimation Pipeline
-# --------------------------
+# -----------------------------
 
-fit_pipe = pe.Workflow(name="parameter_fitting_pipe",base_dir=working_base)
+fit_pipe = pe.Workflow(name="parameter_estimation_pipe",base_dir=working_base)
 
 # Grab all of the coregistered FLASH images from the analysis directory
 regflashgrabber = pe.Node(nio.DataGrabber(infields=["sid"],outfields=["flash_files"]),
@@ -205,7 +205,7 @@ paramsink = pe.Node(nio.DataSink(base_directory=analysis_dir),name="paramsink")
 paramsink.inputs.parameterization = False
 paramsink.inputs.substitutions = [("T1_out_recip","R1")]
 fit_pipe.connect([(sidsource, paramsink, [("sid", "container"),
-                                          (("sid", lambda x: "_sid_"+x), "strip_dir"),
+                                          (("sid", lambda x: "_sid_"+x), "strip_dir")]),
                   (fitparams, paramsink, [("t1_image", "tissue_parameters.@T1_vol")]),
                   (invert, paramsinl, [("out_file", "tissue_parameters.@R1_vol")])
                   ])
