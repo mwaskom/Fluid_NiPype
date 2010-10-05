@@ -434,9 +434,10 @@ for subj in subjects:
 
 
 for subj in subjects:
+    reconcmd = ""
+    dtcmd = ""
     # Start recon-all 
     # ---------------
-    reconcmd = ""
     # Can automatically submit a recon-all job to the Sun Grid Engine.
     # This might only work on mindhive, I'm not 100% sure where it's 
     # getting the environment info from, but it's not passed explicity.
@@ -452,33 +453,32 @@ for subj in subjects:
     elif args.recon:
         print "Recon submission requested for %s, but recon source image does not exist"%subj
     
-    # Unpack the DWI image with dt_recon
-    # ----------------------------------
-    dtcmd = ""
-    # Can automatically submit a dt_recon job to the Sun Grid Engine
-    # This should be alright, as dt_recon doen't use SUBJECTS_DIR.
-    # Not sure about inter-version differences in the dt_recon script
-    infofile = os.path.join(datadir, subj, "unpack/%s-dicominfo.txt"%args.type)
-    if args.dwi and os.path.exists(infofile):
-        # Figure out of there's a diffusion acquisision in our dicoms
-        diffinfo = [i for i in parse_info_file(infofile, writeflf=False) if i[0]=="dwi"][0]
-        if diffinfo:
-            if args.debug:
-                print diffinfo
-            srcfile = os.path.join(datadir, subj, "dicom", args.type, diffinfo[1])
-            # Make sure srcfile exists
-            if os.path.exists(srcfile):
-                trgdir = os.path.join(datadir, subj, "dwi")
-                if not os.path.exists(trgdir):
-                    os.makedirs(trgdir)
-                # Check for this process by looking for the log file
-                if not os.path.exists(os.path.join(trgdir, "dt_recon.log")):
-                    dtcmd = "'dt_recon --i %s --s %s --o %s"%(srcfile, subj, trgdir)
-                    print "Submitting %s dt_recon job to SGE"%subj
+        # Unpack the DWI image with dt_recon
+        # ----------------------------------
+        # Can automatically submit a dt_recon job to the Sun Grid Engine
+        # This should be alright, as dt_recon doen't use SUBJECTS_DIR.
+        # Not sure about inter-version differences in the dt_recon script
+        infofile = os.path.join(datadir, subj, "unpack/%s-dicominfo.txt"%args.type)
+        if args.dwi and os.path.exists(infofile):
+            # Figure out of there's a diffusion acquisision in our dicoms
+            diffinfo = [i for i in parse_info_file(infofile, writeflf=False) if i[0]=="dwi"][0]
+            if diffinfo:
+                if args.debug:
+                    print diffinfo
+                srcfile = os.path.join(datadir, subj, "dicom", args.type, diffinfo[1])
+                # Make sure srcfile exists
+                if os.path.exists(srcfile):
+                    trgdir = os.path.join(datadir, subj, "dwi")
+                    if not os.path.exists(trgdir):
+                        os.makedirs(trgdir)
+                    # Check for this process by looking for the log file
+                    if not os.path.exists(os.path.join(trgdir, "dt_recon.log")):
+                        dtcmd = "'dt_recon --i %s --s %s --o %s"%(srcfile, subj, trgdir)
+                        print "Submitting %s dt_recon job to SGE"%subj
+                    else:
+                        print "dt_recon log found for %s; skipping dwi unpacking"
                 else:
-                    print "dt_recon log found for %s; skipping dwi unpacking"
-            else:
-                "DWI source DICOM not found for %s, skipping dwi unpacking"%subj
+                    "DWI source DICOM not found for %s, skipping dwi unpacking"%subj
     
     # Actually submit to Sun Grid Engine
     # ----------------------------------

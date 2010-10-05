@@ -4,7 +4,7 @@ Fluid Intelligence Project Analysis Code
 Functional Analysis
 -------------------
 
-``fluid_nipype.py:`` -- 
+``fluid_nipype.py`` -- 
 Main interface for functional analysis
 
 ``fluid_source.py`` -- 
