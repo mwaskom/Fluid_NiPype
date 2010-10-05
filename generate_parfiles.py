@@ -1,5 +1,6 @@
 import os
 import sys
+from glob import glob
 import numpy as np
 import scipy.io as scio
 
@@ -8,18 +9,17 @@ def main():
     # Get subject from first command line arg
     try:
         subject = sys.argv[1]
-
     # Print usage and quit if didn't get a subject
     except IndexError:
-        print "    USAGE: generate_parfiles.py [subject_id]"
-        sys.exit(0)
+        sys.exit("\tUSAGE: generate_parfiles.py [subject_id]")
 
     # Hardcode the day (for now)
     day = 1
 
     matfiletemp = dict(nback="sub_%s_day%d_run%d_DUALNBACK.mat",
                        rt="sub_%s_r_%d_TEST_RT_FMRI.mat",
-                       iq="sub_%s_r_%d_s_scan%d_BLOCK_CATTELL.mat")
+                       iq="sub_%s_r_%d_s_scan%d_BLOCK_CATTELL.mat",
+                       mot="%s_Response*.mat")
     
     # Get directory locations
     datadir = "/mindhive/gablab/fluid/Data/%s/"%subject
@@ -34,8 +34,10 @@ def main():
     gen_nback(matfiletemp["nback"], day, subject, srcdir, trgdir)
 
     gen_iq(matfiletemp["iq"], day, subject, srcdir, trgdir)
+    
+    gen_mot(matfiletemp["mot"], day, subject, srcdir, trgdir)
 
-    gen_rt(matfiletemp["rt"], subject, srcdir, trgdir)
+    #gen_rt(matfiletemp["rt"], subject, srcdir, trgdir)
 
 def gen_nback(matfiletemplate, day, subject, srcdir, trgdir):
     print "\nNBack\n======="
@@ -69,11 +71,36 @@ def gen_nback(matfiletemplate, day, subject, srcdir, trgdir):
 
         # Catch the error from a missing .mat file
         except IOError as error:
-            if not os.path.isfile(matfile):
+            if not os.path.exists(matfile):
                 print "ERROR: could not read %s"%matfile
             else:
                 raise error
 
+def gen_mot(matfiletemplate, day, subject, srcdir, trgdir):
+    print "\nMOT\n======="
+    for matfile in glob(os.path.join(srcdir, matfiletemplate%subject)):
+        print "Reading %s"%matfile
+        try:
+            D = scio.loadmat(matfile, struct_as_record=False, squeeze_me=True)["D"]
+            runtype = {129:"Block",193:"Jitter"}[len(D.actualEventStartTime)]
+            for speed in range(1,5):
+                parfile = os.path.join(trgdir, "MOT_%s_speed%d_%s.txt"%(runtype,speed,subject))
+                print "   Writing %s"%parfile
+                fid = open(parfile,"w")
+                for i, time in enumerate(D.actualEventStartTime):
+                    if D.eventCond[i] == speed:
+                        if D.eventType[i] == 3:
+                            now = D.actualEventStartTime[i]
+                            then = D.actualEventStartTime[i+2]
+                            fid.write("%.2f\t%.2f\t1\n"%(now, then-now))
+                fid.close()
+
+        # Catch the error from the missing .mat file
+        except IOError as error:
+            if not os.path.exists(matfile):
+                print "ERROR: could not read %s"%matfile
+            else:
+                raise error
 
 def gen_iq(matfiletemplate, day, subject, srcdir, trgdir):
     print "\nIQ\n======="
@@ -94,7 +121,7 @@ def gen_iq(matfiletemplate, day, subject, srcdir, trgdir):
 
     # Catch the error from a missing .mat file
     except IOError as error:
-        if not os.path.isfile(matfile):
+        if not os.path.exists(matfile):
             print "ERROR: could not read %s"%matfile
         else:
             raise error
@@ -140,7 +167,7 @@ def gen_rt(matfiletemplate, subject, srcdir, trgdir):
             fid.close()
 
         except IOError:
-            if not os.path.isfile(matfile):
+            if not os.path.exists(matfile):
                 print "ERROR: could not read %s"%matfile
             else:
                 raise error

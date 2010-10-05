@@ -16,9 +16,14 @@ import nipype.interfaces.fsl as fsl
 import nipype.interfaces.utility as util
 import nipype.interfaces.freesurfer as fs
 
+# Parse the command line
+# ----------------------
 parser = argparse.ArgumentParser(description="FLASH processing stream for GFluid project.")
 
+subject_list = ["gf21","gf23","gf26","gf27","gf29","gf30","gf32"]
 
+# Hard code some paths
+# --------------------
 working_base = "/mindhive/gablab/fluid/Analysis/NiPype/workingdir/flash"
 data_dir = "/mindhive/gablab/fluid/Data"
 analysis_dir = "/mindhive/gablab/fluid/Analysis/NiPype/flash"
@@ -64,11 +69,22 @@ def get_dcm_substitutes(sid):
         subs.append(("_convertdcm%d/%s_out.mgz"%(i,fname),"flash_%02d-%d.mgz"%(alpha,echo)))
     return subs
 
+def get_angle_groups(subject_list):
+    """Figure out the flip angle groups for each subject."""
+    angles = {(5,20,30):[],(5,30):[]}
+    for sid in subject_list:
+        flashfiles = glob(os.path.join(data_dir, sid, "flash", "flash_??-?.mgz"))
+        if len(flashfiles) == 24:
+            angles[(5,20,30)].append(sid)
+        else:
+            angles[(5,30)].append(sid)
+    return angles
+
 # Subject Info Source
 # -------------------
 
 sidsource = pe.Node(util.IdentityInterface(fields=["sid"]),name="subjsource")
-sidsource.iterables = ("sid", ["gf20"])
+sidsource.iterables = ("sid", subject_list)
 
 # Conversion Pipeline
 # -------------------
@@ -115,7 +131,6 @@ reg_pipe = pe.Workflow(name="registration_pipe",
 
 # Provide the set of angles for our FLASH acquisistions
 anglesource = pe.Node(util.IdentityInterface(fields=["alpha"]),name="anglesource")
-anglesource.iterables = ("alpha", [5, 20, 30])
 
 # Collect FLASH images in compressed mgh format from the Data directory
 flashgrabber = pe.Node(nio.DataGrabber(infields=["alpha","sid"],outfields=["flash_files"]),
@@ -190,24 +205,43 @@ fitparams = pe.Node(fs.FitMSParams(), name="fitparams")
 
 fit_pipe.connect(regflashgrabber, "flash_files", fitparams, "in_files")
 
-# Convert the T1 volume to nifti
-convert2nii = pe.Node(fs.MRIConvert(out_type="niigz"), name="convert2nii")
+hemisource = pe.Node(util.IdentityInterface(fields=["hemi"]),name="hemisource")
+hemisource.iterables = ("hemi", ["lh","rh"])
 
-fit_pipe.connect(fitparams, "t1_image", convert2nii, "in_file")
+# Sample the T1 volume onto the cortical surface
+t1surf = pe.Node(fs.SampleToSurface(reg_header=True,
+                                    sampling_method="point",
+                                    sampling_range=.5,
+                                    sampling_units="frac",
+                                    cortex_mask=True),
+                 name="t1surf")
 
-# Get the R1 volume by taking the reciprocal of the T1 volume
-invert = pe.Node(fsl.ImageMaths(op_string="-recip",suffix="recip"), name="invert_t1")
+fit_pipe.connect([(sidsource, t1surf, [("sid", "subject_id")]),
+                  (hemisource, t1surf, [("hemi", "hemi")]),
+                  (fitparams, t1surf, [("t1_image", "source_file")]),
+                  ])
 
-fit_pipe.connect(convert2nii, "out_file", invert, "in_file")
+#Take screenshots of the T1 parameters on the surface
+surfshots = pe.Node(fs.SurfaceScreenshots(surface="inflated",
+                                          show_color_scale=True,
+                                          show_gray_curv=True,
+                                          six_images=True,
+                                          overlay_range=(950,2500)),
+                    name="surfshots")
 
-# Sink the T1 and R1 volumes in the analysis directory
+fit_pipe.connect([(sidsource, surfshots, [("sid", "subject")]),
+                  (hemisource, surfshots, [("hemi", "hemi")]),
+                  (t1surf, surfshots, [("out_file", "overlay")]),
+                  ])
+
+# Sink the T1 volumes and surfaces into the analysis directory
 paramsink = pe.Node(nio.DataSink(base_directory=analysis_dir),name="paramsink")
 paramsink.inputs.parameterization = False
-paramsink.inputs.substitutions = [("T1_out_recip","R1")]
 fit_pipe.connect([(sidsource, paramsink, [("sid", "container"),
                                           (("sid", lambda x: "_sid_"+x), "strip_dir")]),
                   (fitparams, paramsink, [("t1_image", "tissue_parameters.@T1_vol")]),
-                  (invert, paramsinl, [("out_file", "tissue_parameters.@R1_vol")])
+                  (t1surf, paramsink, [("out_file", "tissue_parameters.@T1_surf")]),
+                  (surfshots, paramsink, [("screenshots", "screenshots.@images")]),
                   ])
 
 # Set the crashdump directory                           
@@ -220,3 +254,15 @@ convert_pipe.config = dict(crashdump_dir=crashdir)
 reg_pipe.config = dict(crashdump_dir=crashdir)
 fit_pipe.config = dict(crashdump_dir=crashdir)
 
+def run_reg_pipe():
+    angles = get_angle_groups(subject_list)
+    for anglegroup in angles:
+        anglesource.iterables = ("alpha", anglegroup)
+        sidsource.iterables = ("sid", angles[anglegroup])
+        reg_pipe.run()
+    sidsource.iterables = ("sid", subject_list)
+
+if __name__ == "__main__":
+    convert_pipe.run()
+    run_reg_pipe()
+    fit_pipe.run()

@@ -55,6 +55,14 @@ NiPype script to convert DICOM files to nifti/mgh format
 ``fetch_fluid_dicoms.py`` -- 
 Wrapper for ``fetch_dicoms`` script that handles our directory structure
 
+``generate_parfiles.py`` -- 
+Script to read Psychtoolbox experiment files and create FSL parfiles
+
 ``fluid_utility_funcs.py`` -- 
-Random functions used in our NiPype scripts
+Assorted functions used in our NiPype scripts
+
+Note
+----
+
+The code contained in this repository is subject to change at any time.
 

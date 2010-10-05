@@ -347,7 +347,7 @@ surfsmooth = pe.MapNode(interface=fs.Smooth(proj_frac_avg=(0,1,0.1)),
 
 preproc.connect(maskfunc2, "out_file", surfsmooth, "in_file")
 preproc.connect(surfsmoothval, "fwhm", surfsmooth, "surface_fwhm")
-preproc.connect(reg2struct, "out_reg_file", surfsmooth, "reg_file")
+preproc.connect(reg2struct, "out_file", surfsmooth, "reg_file")
 
 """
 Mask the smoothed data with the dilated mask
