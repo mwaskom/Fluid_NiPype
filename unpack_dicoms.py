@@ -1,11 +1,19 @@
 """
-DICOM Unpacking script for the Fluid Intelligence project.
-Will unpack DICOM directory, create heuristic softlinks, and optionally
-submit recon-all jobs to the Sun Grid Engine
+DICOM conversion and preprocessing script for Fluid Intelligence project.
+
+Steps:
+ - Fetch DICOM files from Sigma
+ - Parse DICOM directory to obtain sequence info file
+ - Automatically unpack the full acquisitions
+ - Create heuristic softlinks to Nifti and MGZ files
+ - Run the Freesurfer reconstruction pipeline
+ - Preprocesses DWI images
+ - Perform spatial normalization to FSL's template with FLIRT and FNIRT
 """
 import os
 import sys
 import shutil
+import time
 from datetime import datetime
 import subprocess
 import argparse
@@ -30,14 +38,16 @@ parser.add_argument("-fetch", action="store_true",
                     help="run fetch_dicoms to copy from sigma before unpacking")
 parser.add_argument("-moco", action="store_true",
                     help="unpack the MoCo BOLD runs")
-parser.add_argument("-recon", action="store_true",
-                    help="Submit a recon-all job to SGE after unpacking")
 parser.add_argument("-norun", dest="run", action="store_false",
                     help="don't run the unpacking pipeline")
 parser.add_argument("-nolink", dest="link", action="store_false",
                     help="don't create the heuristic links")
+parser.add_argument("-norecon", dest="recon", action="store_false",
+                    help="Submit a recon-all job to SGE after unpacking")
 parser.add_argument("-nodwi", dest="dwi", action="store_false",
                     help="don't run dt_recon to unpack the DWI image")
+parser.add_argument("-noreg", dest="reg", action="store_false",
+                    help="don't perform FSL registration")
 parser.add_argument("-reparse", action="store_true",
                     help="force rerunning of the dicom directory parsing")
 parser.add_argument("-reconvert", action="store_true",
@@ -62,6 +72,10 @@ subject_template = "gf*"
 # This should work, but I haven't actually tested it.
 if not args.type:
     args.type = ""
+if args.type == "func":
+    args.recon = False
+    args.dwi = False
+    args.reg = False
 
 # Initialize the subjectinfo dict
 subjectinfo = {}
@@ -446,20 +460,15 @@ for subj in subjects:
 # ------------------------
 
 for subj in subjects:
-    reconcmd = ""
-    dtcmd = ""
-    # Start recon-all 
+    sgescript = []
+
+    # Run recon-all 
     # ---------------
-    # Can automatically submit a recon-all job to the Sun Grid Engine.
-    # This might only work on mindhive, I'm not 100% sure where it's 
-    # getting the environment info from, but it's not passed explicity.
-    # Probably best to have your subjects dir set correctly.
-    # Make sure the source image exists
     if args.recon and os.path.exists(os.path.join(datadir, subj, "mri/orig/001.mgz")):
         # Make sure a recon hasn't been started for this subject
         if not os.path.isfile(os.path.join(datadir, subj, "scripts/recon-all-status.log")):
-            reconcmd = "recon-all -s %s -all"%subj
-            print "Submitting %s recon job to SGE"%subj
+            sgescript.append("recon-all -s %s -all"%subj)
+            print "Adding %s recon job to SGE script"%subj
         else:
             print "Recon submission requested for %s, but recon status log exists"%subj
     elif args.recon:
@@ -467,11 +476,8 @@ for subj in subjects:
     
     # Unpack the DWI image with dt_recon
     # ----------------------------------
-    # Can automatically submit a dt_recon job to the Sun Grid Engine
-    # This should be alright, as dt_recon doen't use SUBJECTS_DIR.
-    # Not sure about inter-version differences in the dt_recon script
     infofile = os.path.join(datadir, subj, "unpack/%s-dicominfo.txt"%args.type)
-    if args.recon and args.dwi and os.path.exists(infofile):
+    if args.dwi and os.path.exists(infofile):
         # Figure out of there's a diffusion acquisision in our dicoms
         diffinfo = [i for i in parse_info_file(infofile, writeflf=False) if i[0]=="dwi"][0]
         if diffinfo:
@@ -485,19 +491,52 @@ for subj in subjects:
                     os.makedirs(trgdir)
                 # Check for this process by looking for the log file
                 if not os.path.exists(os.path.join(trgdir, "dt_recon.log")):
-                    dtcmd = "dt_recon --i %s --s %s --o %s"%(srcfile, subj, trgdir)
-                    print "Submitting %s dt_recon job to SGE"%subj
+                    sgescript.append("dt_recon --i %s --s %s --o %s"%(srcfile, subj, trgdir))
+                    print "Adding %s dt_recon job to SGE script"%subj
                 else:
-                    print "dt_recon log found for %s; skipping dwi unpacking"
+                    print "dt_recon log found for %s; skipping dwi unpacking"%subj
             else:
                 "DWI source DICOM not found for %s, skipping dwi unpacking"%subj
 
+    # Perform spatial normalization
+    # -----------------------------
+    if args.reg and (os.path.exists(os.path.join(datadir, subj, "mri", "brainmask.mgz")) and
+                     os.path.exists(os.path.join(datadir, subj, "mri", "T1.mgz"))):
+        sgescript.append(
+            "python /mindhive/gablab/fluid/NiPype_Code/fluid_register.py %s"%subj)
+        print "Adding %s normalization to SGE script"%subj
+    elif args.reg:
+        print "Normalization requested for %s, but source images not found"%subj
+        
     # Actually submit to Sun Grid Engine
     # ----------------------------------
-    proc = ";".join([reconcmd,dtcmd]).strip(";")
-    if proc:
-        sgecmd = "ezsub.py -c '%s' -n %s_recon -q long.q"%(proc, subj)
-        if args.debug:
-            print "Sun Grid Engine command: \n",sgecmd
+    if sgescript:
+        sgedir = os.path.join(os.getenv("HOME"), "sge")
+        if not os.path.exists(sgedir):
+            os.mkdir(sgedir)
+        # Write a script to give to qsub
+        scriptfile = os.path.join(sgedir, "%s_recon_%s.sh"%(subj, time.time()))
+        fid = open(scriptfile,"w")
+        fid.write("\n".join(["#! /bin/bash",
+                             "#$ -cwd",
+                             "#$ -N %s_recon"%subj,
+                             "#$ -r y",
+                             "#$ -S /bin/bash",
+                             ""]))
+        fid.write("\n".join(sgescript))
+        fid.close()
         
-        os.system(sgecmd)
+        # Write the qsub command line
+        qsub = ["cd",sgedir,";","qsub","-q","long",scriptfile]
+        cmd = " ".join(qsub)
+        
+        # Submit the job
+        print "Submitting job %s_recon to Sun Grid Engine"%subj
+        proc = subprocess.Popen(cmd,
+                                stdout = subprocess.PIPE,
+                                stderr = subprocess.PIPE,
+                                env=os.environ,
+                                shell=True,
+                                cwd=sgedir)
+        stdout, stderr = proc.communicate()
+        
