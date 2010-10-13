@@ -84,7 +84,7 @@ def gen_mot(matfiletemplate, day, subject, srcdir, trgdir):
             D = scio.loadmat(matfile, struct_as_record=False, squeeze_me=True)["D"]
             runtype = {129:"Block",193:"Jitter"}[len(D.actualEventStartTime)]
             for speed in range(1,5):
-                parfile = os.path.join(trgdir, "MOT_%s_speed%d_%s.txt"%(runtype,speed,subject))
+                parfile = os.path.join(trgdir, "MOT_%s_r1_d1_speed%d_%s.txt"%(runtype,speed,subject))
                 print "   Writing %s"%parfile
                 fid = open(parfile,"w")
                 for i, time in enumerate(D.actualEventStartTime):
@@ -94,6 +94,15 @@ def gen_mot(matfiletemplate, day, subject, srcdir, trgdir):
                             then = D.actualEventStartTime[i+2]
                             fid.write("%.2f\t%.2f\t1\n"%(now, then-now))
                 fid.close()
+            parfile = os.path.join(trgdir, "MOT_%s_r1_d1_resp_%s.txt"%(runtype,subject))
+            print "   Writing %s"%parfile
+            fid = open(parfile,"w")
+            for i, time in enumerate(D.actualEventStartTime):
+                if D.eventType[i] == 5:
+                    now = D.actualEventStartTime[i]
+                    then = D.actualEventStartTime[i+1]
+                    fid.write("%.2f\t%.2f\t1\n"%(now, then-now))
+            fid.close()
 
         # Catch the error from the missing .mat file
         except IOError as error:

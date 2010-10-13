@@ -164,6 +164,10 @@ def parse_info_file(dcminfofile, writeflf=True):
                       and not is_moco(os.path.join(datadir,subject,"dicom",args.type,dcmfile))):
                     if (t==198) and name.startswith("NBack"):
                         info.append(("bold",dcmfile,seqn,name))
+                    elif (t==248) and name.startswith("MOT_Block"):
+                        info.append(("bold",dcmfile,seqn,name))
+                    elif (t==302) and name.startswith("MOT_Jitter"):
+                        info.append(("bold",dcmfile,seqn,name))
                     elif (t==208) and name.startswith("RT_ge_func"):
                         info.append(("bold",dcmfile,seqn,name))
                     elif (t==244) and name.startswith("IQ_ge_func"):
@@ -176,7 +180,10 @@ def parse_info_file(dcminfofile, writeflf=True):
                     name = name.split("_")[0] + "-moco"
                     if (t==198) and name.startswith("NBack"):
                         info.append(("bold",dcmfile,seqn,name))
-                    # XXX Insert MOT here
+                    elif (t==248) and name.startswith("MOT_Block"):
+                        info.append(("bold",dcmfile,seqn,name))
+                    elif (t==302) and name.startswith("MOT_Jitter"):
+                        info.append(("bold",dcmfile,seqn,name))
                     elif (t==244) and name.startswith("IQ_ge_func"):
                         info.append(("bold",dcmfile,seqn,name))
                     elif (t==62) and name.endswith("Resting"):
@@ -280,7 +287,7 @@ datasink.inputs.base_directory = datadir
 datasink.inputs.parameterization = False
 
 # Workflow definition
-unpack = pe.Workflow(name="unpackdicoms")
+unpack = pe.Workflow(name="unpack_%s"%args.type)
 unpack.base_dir = "/mindhive/gablab/fluid/Analysis/NiPype/workingdir/unpack"
 
 # Workflow connection
@@ -361,7 +368,7 @@ for subj in subjects:
         # Get information about the sequences
         info = parse_info_file(infofile, writeflf=False)
         # Hash dict to control names for multiple runs
-        boldhash = dict(IQ=1,NBack=1,RT=1)
+        boldhash = dict(IQ=1,NBack=1,RT=1,MOT_Jitter=1,MOT_Block=1)
         for seq in info:
             if args.debug:
                 print "Sequence info: %s"%str(seq)
@@ -400,7 +407,10 @@ for subj in subjects:
                     if name == "Resting":
                         trgfile = "Resting%s.nii.gz"%moco
                     else:
-                        par = name.split("_")[0]
+                        if name.startswith("MOT"):
+                            par = "MOT_" + name.split("_")[1]
+                        else:
+                            par = name.split("_")[0]
                         nrun = boldhash[par]
                         boldhash[par] += 1
                         trgfile = "%s_run%d%s.nii.gz"%(par,nrun,moco)
@@ -432,6 +442,8 @@ for subj in subjects:
     elif args.link:
         print "Info file %s not found"%infofile
 
+# Structural Preprocessing
+# ------------------------
 
 for subj in subjects:
     reconcmd = ""
@@ -446,43 +458,46 @@ for subj in subjects:
     if args.recon and os.path.exists(os.path.join(datadir, subj, "mri/orig/001.mgz")):
         # Make sure a recon hasn't been started for this subject
         if not os.path.isfile(os.path.join(datadir, subj, "scripts/recon-all-status.log")):
-            reconcmd = "'recon-all -s %s -all'"%subj
+            reconcmd = "recon-all -s %s -all"%subj
             print "Submitting %s recon job to SGE"%subj
         else:
             print "Recon submission requested for %s, but recon status log exists"%subj
     elif args.recon:
         print "Recon submission requested for %s, but recon source image does not exist"%subj
     
-        # Unpack the DWI image with dt_recon
-        # ----------------------------------
-        # Can automatically submit a dt_recon job to the Sun Grid Engine
-        # This should be alright, as dt_recon doen't use SUBJECTS_DIR.
-        # Not sure about inter-version differences in the dt_recon script
-        infofile = os.path.join(datadir, subj, "unpack/%s-dicominfo.txt"%args.type)
-        if args.dwi and os.path.exists(infofile):
-            # Figure out of there's a diffusion acquisision in our dicoms
-            diffinfo = [i for i in parse_info_file(infofile, writeflf=False) if i[0]=="dwi"][0]
-            if diffinfo:
-                if args.debug:
-                    print diffinfo
-                srcfile = os.path.join(datadir, subj, "dicom", args.type, diffinfo[1])
-                # Make sure srcfile exists
-                if os.path.exists(srcfile):
-                    trgdir = os.path.join(datadir, subj, "dwi")
-                    if not os.path.exists(trgdir):
-                        os.makedirs(trgdir)
-                    # Check for this process by looking for the log file
-                    if not os.path.exists(os.path.join(trgdir, "dt_recon.log")):
-                        dtcmd = "'dt_recon --i %s --s %s --o %s"%(srcfile, subj, trgdir)
-                        print "Submitting %s dt_recon job to SGE"%subj
-                    else:
-                        print "dt_recon log found for %s; skipping dwi unpacking"
+    # Unpack the DWI image with dt_recon
+    # ----------------------------------
+    # Can automatically submit a dt_recon job to the Sun Grid Engine
+    # This should be alright, as dt_recon doen't use SUBJECTS_DIR.
+    # Not sure about inter-version differences in the dt_recon script
+    infofile = os.path.join(datadir, subj, "unpack/%s-dicominfo.txt"%args.type)
+    if args.recon and args.dwi and os.path.exists(infofile):
+        # Figure out of there's a diffusion acquisision in our dicoms
+        diffinfo = [i for i in parse_info_file(infofile, writeflf=False) if i[0]=="dwi"][0]
+        if diffinfo:
+            if args.debug:
+                print diffinfo
+            srcfile = os.path.join(datadir, subj, "dicom", args.type, diffinfo[1])
+            # Make sure srcfile exists
+            if os.path.exists(srcfile):
+                trgdir = os.path.join(datadir, subj, "dwi")
+                if not os.path.exists(trgdir):
+                    os.makedirs(trgdir)
+                # Check for this process by looking for the log file
+                if not os.path.exists(os.path.join(trgdir, "dt_recon.log")):
+                    dtcmd = "dt_recon --i %s --s %s --o %s"%(srcfile, subj, trgdir)
+                    print "Submitting %s dt_recon job to SGE"%subj
                 else:
-                    "DWI source DICOM not found for %s, skipping dwi unpacking"%subj
-    
+                    print "dt_recon log found for %s; skipping dwi unpacking"
+            else:
+                "DWI source DICOM not found for %s, skipping dwi unpacking"%subj
+
     # Actually submit to Sun Grid Engine
     # ----------------------------------
     proc = ";".join([reconcmd,dtcmd]).strip(";")
     if proc:
-        sgecmd = "ezsub.py -c %s -n %s_recon -q long.q"%(proc, subj)
+        sgecmd = "ezsub.py -c '%s' -n %s_recon -q long.q"%(proc, subj)
+        if args.debug:
+            print "Sun Grid Engine command: \n",sgecmd
+        
         os.system(sgecmd)
