@@ -31,7 +31,10 @@ threshres = pe.MapNode(interface=fsl.ImageStats(op_string = "-r"),
                        name="threshresidual",
                        iterfield=["in_file"])
   
-overlayres = pe.MapNode(interface=fsl.Overlay(auto_thresh_bg=True),
+mni_brain = fsl.Info.standard_image("avg152T1.nii.gz")
+
+overlayres = pe.MapNode(interface=fsl.Overlay(auto_thresh_bg=True,
+                                              background_image=mni_brain),
                         name="overlayresidual",
                         iterfield = ["stat_image", "stat_thresh"])
 
@@ -43,27 +46,14 @@ sliceres = pe.MapNode(interface=fsl.Slicer(all_axial=True,
 contrastestimate = pe.MapNode(interface=fsl.ContrastMgr(), name="contrastestimate",
                               iterfield = ["tcon_file","stats_dir"])
 
-mergecontrast = pe.MapNode(interface=util.Merge(3,axis="hstack"),
-                           iterfield = ["in1","in2","in3"],
-                           name = "mergecontrast")
-
 selectcontrast = pe.MapNode(interface=util.Select(), 
                             name="selectcontrast", 
                             iterfield=["inlist"])
 
-xfmcopes = pe.MapNode(interface=fs.ApplyVolTransform(fs_target=True,
-                                                     no_resample=True),
-                      iterfield = ["source_file","reg_file"],
-                      name = "xfmcopes")
-
-xfmvarcopes = pe.MapNode(interface=fs.ApplyVolTransform(fs_target=True,
-                                                        no_resample=True),
-                         iterfield = ["source_file","reg_file"],
-                         name = "xfmvarcopes")
-
 overlaystats = pe.MapNode(interface=fsl.Overlay(stat_thresh=(2.5,10),
                                                 auto_thresh_bg=True,
-                                                show_negative_stats=True),
+                                                show_negative_stats=True,
+                                                background_image=mni_brain),
                           name="overlaystats",
                           iterfield = ["stat_image"])
                      
@@ -87,18 +77,13 @@ fsl_vol_model.connect([
    (level1design,modelgen,[("fsf_files","fsf_file")]),
    (modelgen,modelestimate,[("design_file","design_file")]),
    (modelgen,contrastestimate,[("con_file","tcon_file")]),
-   (contrastestimate,mergecontrast,[(("copes", con_sort), "in1"),
-                                    (("varcopes", con_sort), "in2"),
-                                    (("zstats", con_sort), "in3")]),
-   (mergecontrast,selectcontrast,[("out","inlist")]),
-   (selectcontrast,xfmcopes,[(("out",lambda x: [l[0] for l in x]),"source_file")]),
-   (selectcontrast,xfmvarcopes,[(("out",lambda x: [l[1] for l in x]),"source_file")]),
+   (contrastestimate,selectcontrast,[(("zstats", con_sort),"inlist")]),
    (modelestimate,threshres,[("sigmasquareds","in_file")]),
    (modelestimate,overlayres,[("sigmasquareds","stat_image")]),
    (threshres,overlayres,[(("out_stat", lambda x: [tuple(i) for i in x]), "stat_thresh")]),
    (overlayres,sliceres,[("out_file", "in_file")]),
    (modelestimate,contrastestimate,[("results_dir","stats_dir")]),
-   (selectcontrast,overlaystats,[(("out",lambda x: [l[2] for l in x]),"stat_image")]),
+   (selectcontrast,overlaystats,[("out","stat_image")]),
    (overlaystats, slicestats, [("out_file", "in_file")]),
    ])
 
