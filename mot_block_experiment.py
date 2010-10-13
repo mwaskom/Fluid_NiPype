@@ -1,13 +1,12 @@
 """
     Nipype experiment module for the jittered MOTT paradigm.
 """
-template_args = dict(func=[["subject_id", "MOT_Block_run1"]],
-                     target=[["subject_id", "ep2d_t1w"]],
-                     struct=[["subject_id", "mprage"]])
+import re
 
-source_template = "%s/nii/%s.nii.gz"
+template_args = dict(func=[["subject_id", "bold", "MOT_Block_run1"]],
+                     struct=[["subject_id", "structural", "mprage"]])
 
-exclude_subjects = ["SMARTER_SP%02d"%i for i in [1, 2, 5, 7, 8, 9]]
+source_template = "%s/%s/%s.nii.gz"
 
 hpcutoff = 128
 TR = 2.
@@ -18,7 +17,7 @@ nruns = 1
 fsl_bases = {"dgamma":{"derivs":False}}
 spm_bases = {"hrf":[0,0]}
 
-parfile_template = "%s/parfiles/MOT_Block_r%d_%s_%s.txt"
+parfile_template = "%s/parfiles/MOT_Block_r%d_d1_%s_%s.txt"
 
 names = ["speed1", "speed2", "speed3", "speed4", "resp"]
 
@@ -39,3 +38,7 @@ cont14 = ["vfast-slow", "T", names, [-1,0,0,1,0]]
 cont15 = ["vfast-normal", "T", names, [0,-1,0,1,0]]
 cont16 = ["vfast-fast", "T", names, [0,0,-1,1,0]]
 
+convars = [var for var in dir() if re.match("cont\d+",var)]
+convars.sort()
+
+contrasts = [locals()[con] for con in convars]
