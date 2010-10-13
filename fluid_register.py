@@ -62,7 +62,7 @@ def log(interface, result):
 try:
     # Brainmask to nifti
     cvt = fs.MRIConvert(in_file=brainmask_mgz, out_file=brainmask)
-    if force or os.path.exists(brainmask):
+    if force or not os.path.exists(brainmask):
         res = cvt.run()
         log(cvt, res)
 
@@ -111,8 +111,8 @@ try:
     # Slice output for qc
     slicer = fsl.Slicer(in_file      = t1_fnirted,
                         image_edges  = target_brain,
-                        sample_axial = 3,
                         image_width  = 750,
+                        sample_axial = 3,
                         out_file     = qcpng)
     if force or not os.path.exists(qcpng):
         res = slicer.run()
