@@ -5,17 +5,21 @@
 
 import os
 import sys
+import subprocess
 import nipype.interfaces.fsl as fsl
 import nipype.interfaces.freesurfer as fs
 from nipype.utils.filemanip import FileNotFoundError
 
 if len(sys.argv) < 2:
-    sys.exit("USAGE: fluid_register.py [-f] SUBJECT")
+    sys.exit("USAGE: fluid_register.py [-v -f] SUBJECT")
 
 subject = sys.argv[-1]
 force = False
+v = False
 if "-f" in sys.argv:
     force = True
+if "-v" in sys.argv:
+    v = True
 
 # Get target images
 target_brain = fsl.Info.standard_image("avg152T1_brain.nii.gz")
@@ -109,17 +113,71 @@ try:
         os.remove(fnirtlog)
 
     # Slice output for qc
-    slicer = fsl.Slicer(in_file      = t1_fnirted,
-                        image_edges  = target_brain,
-                        image_width  = 750,
-                        sample_axial = 3,
-                        out_file     = qcpng)
     if force or not os.path.exists(qcpng):
-        res = slicer.run()
-        log(slicer, res)
+        planes = ["x","y","z"]
+        options = []
+        for plane in planes:
+            for slice in ["%.2f"%i for i in .15,.3,.45,.5,.55,.7,.85]:
+                if not(plane == "x" and slice == "0.50"):
+                    options.append((plane,slice))
+
+        shots = ["%s-%s.png"%i for i in options]
+
+        for i, shot in enumerate(shots):
+            cmd = ["/usr/share/fsl/4.1/bin/slicer", 
+                   t1_fnirted, 
+                   target_brain,
+                   "-%s"%options[i][0],
+                   options[i][1],
+                   shot]
+            cmdline = " ".join(cmd)
+            logfile.write(cmdline + "\n")
+            proc = subprocess.Popen(cmdline,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    env=os.environ,
+                                    shell=True)
+            res = proc.communicate()
+            if v:
+                print cmdline, res[0],res[1]
+        for i in range(3):
+            cmd = ["pngappend"]
+            cmd.append(" + ".join([s for s in shots if s.startswith(planes[i])]))
+            rowimg = "row-%d.png"%i
+            cmd.append(rowimg)
+            shots.append(rowimg)
+            cmdline = " ".join(cmd)
+            logfile.write(cmdline + "\n")
+            proc = subprocess.Popen(cmdline,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    env=os.environ,
+                                    shell=True)
+            res = proc.communicate()                                    
+            if v:
+                print cmdline, res[0],res[1]
+        cmd = ["pngappend"]
+        cmd.append(" - ".join(["row-%d.png"%i for i in range(3)]))
+        cmd.append(qcpng)
+        cmdline = " ".join(cmd)
+        logfile.write(cmdline + "\n")
+        proc = subprocess.Popen(cmdline,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                env=os.environ,
+                                shell=True)
+        res = proc.communicate()
+        if v:
+            print cmdline, res[0],res[1]
+        for shot in shots:
+            os.remove(os.path.join(regdir, shot))
 
 except:
     # Deal with exceptions
     logfile.close()
     os.chdir(origdir)
     raise
+
+# Clean up
+logfile.close()
+os.chdir(origdir)
