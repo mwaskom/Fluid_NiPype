@@ -240,57 +240,11 @@ regfunc = pe.MapNode(fs.BBRegister(contrast_type="t2",
                      name="regfunc")
 
 # XXX Insert slicer report node here
-
-# Get the T1 and brainmask from recon-all
-fssource = pe.Node(nio.FreeSurferSource(subjects_dir="/mindhive/gablab/fluid/Data"),
-                   name="fssource")
-
-# Convert the brainmask to Nifti so FLIRT can read it
-niftimask = pe.Node(fs.MRIConvert(out_type="niigz"),
-                    name="niftimask")
-
-# Get the standard-space FLIRT target
-targetbrain = fsl.Info.standard_image("avg152T1_brain.nii.gz")
-
-# Register the brainmask to the target using a 12-dof affine transformation
-regstruct = pe.Node(fsl.FLIRT(reference=targetbrain,
-                              searchr_x=[-180,180],
-                              searchr_y=[-180,180],
-                              searchr_z=[-180,180]),
-                    name="regstruct")
-
-# XXX Insert slicer report node here
-# Convert the T1 to nifti so FNIRT can read it
-niftit1 = pe.Node(fs.MRIConvert(out_type="niigz"),
-                  name="niftit1")
-
-# Path to the standard FNIRT config file
-fnirtcfg = "/usr/share/fsl/4.1/etc/flirtsch/T1_2_MNI152_2mm.cnf"
-
-# Get the standard space fnirt target
-targethead = fsl.Info.standard_image("avg152T1.nii.gz")
-
-# Use FNIRT to get a nonlinear transformation to the target
-fnirt = pe.Node(fsl.FNIRT(config_file=fnirtcfg,
-                          ref_file=targethead),
-                          field_file=True,
-                name="fnirt")
-
+# XXX We'll have to get the warpfield from inputnode now
 # Apply the nonlinear warp to the timeseries
 warpfunc = pe.MapNode(fsl.ApplyWarp(ref_file=targethead),
                       iterfield=["in_file","premat"],
                       name="warpfunc")
-
-# Concatenate the func to anat and anat to standard transform matrices
-matconcat = pe.MapNode(fsl.ConvertXFM(concat_xfm=True),
-                       iterfield=["in_file"],
-                       name="matconcat")
-
-# Apply the concatenated transformation to each timeseries
-funcxfm = pe.MapNode(fsl.FLIRT(apply_xfm=True,
-                               reference=targetbrain),
-                     iterfield=["in_file", "in_matrix_file"],
-                     name="funcxfm")
 
 # Connect the registration pipeline
 preproc.connect([

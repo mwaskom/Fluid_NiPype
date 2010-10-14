@@ -72,6 +72,9 @@ subject_template = "gf*"
 # This should work, but I haven't actually tested it.
 if not args.type:
     args.type = ""
+
+# Don't do any structural processing if we're just 
+# unpacking a functional session
 if args.type == "func":
     args.recon = False
     args.dwi = False
@@ -174,6 +177,9 @@ def parse_info_file(dcminfofile, writeflf=True):
                     info.append(("fieldmaps",dcmfile,seqn,seqname))
                 elif (t==70) and name.startswith("DIFFUSION"):
                     info.append(("dwi",dcmfile,seqn,"diffusion"))
+                elif (s==176) and (t==1) and name.startswith("gre_mgh_multiecho"):
+                    angle = int(name[18:-12])
+                    info.append(("flash",dcmfile,seqn,"flash_%02d-rms"%angle))
                 elif ("ge_func" in name
                       and not is_moco(os.path.join(datadir,subject,"dicom",args.type,dcmfile))):
                     if (t==198) and name.startswith("NBack"):
@@ -405,12 +411,11 @@ for subj in subjects:
                     elif name.startswith("T1_MPRAGE"):
                         src = get_img_name(subj, seqn, "nii.gz")
                         trgfile = "mprage.nii.gz"
-                    # Our flashes are now converted elsewhere (they don't get added 
-                    # to the info list during a parse_info_file() call), but there was
-                    # no reason to delete the FLASH code as this block will never execute
-                    elif name.startswith("flash"):
-                        src = get_img_name(subj, seqn, "mgz")
-                        trgfile = "%s.mgz"%name
+                # We unpack the FLASH rms image here, and get
+                # the individual echos later
+                elif type == "flash":
+                    src = get_img_name(subj, seqn, "mgz")
+                    trgfile = "%s.mgz"%name
                 # Functional runs
                 elif type == "bold":
                     src = get_img_name(subj, seqn, "nii.gz")
@@ -467,6 +472,7 @@ for subj in subjects:
     if args.recon and os.path.exists(os.path.join(datadir, subj, "mri/orig/001.mgz")):
         # Make sure a recon hasn't been started for this subject
         if not os.path.isfile(os.path.join(datadir, subj, "scripts/recon-all-status.log")):
+            # Recon-all command line
             sgescript.append("recon-all -s %s -all"%subj)
             print "Adding %s recon job to SGE script"%subj
         else:
@@ -491,6 +497,7 @@ for subj in subjects:
                     os.makedirs(trgdir)
                 # Check for this process by looking for the log file
                 if not os.path.exists(os.path.join(trgdir, "dt_recon.log")):
+                    # DT_recon command line
                     sgescript.append("dt_recon --i %s --s %s --o %s"%(srcfile, subj, trgdir))
                     print "Adding %s dt_recon job to SGE script"%subj
                 else:
@@ -502,6 +509,7 @@ for subj in subjects:
     # -----------------------------
     if args.reg and (os.path.exists(os.path.join(datadir, subj, "mri", "brainmask.mgz")) and
                      os.path.exists(os.path.join(datadir, subj, "mri", "T1.mgz"))):
+        # Fluid_register command line
         sgescript.append(
             "python /mindhive/gablab/fluid/NiPype_Code/fluid_register.py %s"%subj)
         print "Adding %s normalization to SGE script"%subj

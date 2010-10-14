@@ -50,7 +50,8 @@ Misc
 ----
 
 ``unpack_dicoms.py`` -- 
-NiPype script to convert DICOM files to nifti/mgh format
+NiPype script to convert DICOM files to nifti/mgh format and perform 
+structural preprocessing
 
 ``generate_parfiles.py`` -- 
 Script to read Psychtoolbox experiment files and create FSL parfiles

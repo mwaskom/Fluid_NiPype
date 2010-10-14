@@ -134,7 +134,7 @@ anglesource = pe.Node(util.IdentityInterface(fields=["alpha"]),name="anglesource
 
 # Collect FLASH images in compressed mgh format from the Data directory
 flashgrabber = pe.Node(nio.DataGrabber(infields=["alpha","sid"],outfields=["flash_files"]),
-                          name="flashgrabber")
+                       name="flashgrabber")
 
 flashgrabber.inputs.base_directory = os.path.join(data_dir)
 flashgrabber.inputs.template = "%s/flash/flash_%02d-?.mgz"
@@ -144,17 +144,25 @@ reg_pipe.connect([(sidsource, flashgrabber, [("sid", "sid")]),
                   (anglesource, flashgrabber, [("alpha", "alpha")])
                   ])
 
-# Get a mean image of the 8 FLASH echos
-meanflash = pe.Node(fs.Concatenate(stats="mean"), name="meanflash")
+# Collect the RMS Flash images that were converted earlier
+rmsgrabber = pe.Node(nio.DataGrabber(infields=["alpha","sid"],outfields=["flash_rms"]),
+                     name="rmsgrabber")
 
-reg_pipe.connect(flashgrabber, "flash_files", meanflash, "in_files")
+rmsgrabber.inputs.base_directory = os.path.join(data_dir)
+rmsgrabber.inputs.template = "%s/flash/flash_%02d-rms.mgz"
+rmsgrabber.inputs.template_args = dict(flash_files=[["sid", "alpha"]])
 
-# Skullstrip the mean images
+reg_pipe.connect([(sidsource, rmsgrabber, [("sid", "sid")]),
+                  (anglesource, rmsgrabber, [("alpha", "alpha")])
+                  ])
+
+
+# Skullstrip the RMS images
 stripflash = pe.Node(fsl.BET(), name="stripflash")
 
-reg_pipe.connect(meanflash, "concatenated_file", stripflash, "in_file")
+reg_pipe.connect(rmsgrabber, "flash_rms", stripflash, "in_file")
 
-# Register each mean image to the Freesurfer structural
+# Register each RMS image to the Freesurfer structural
 coregister = pe.Node(fs.BBRegister(init="fsl"),
                      name="coregister")
 
