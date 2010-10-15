@@ -43,11 +43,11 @@ parser.add_argument("-norun", dest="run", action="store_false",
 parser.add_argument("-nolink", dest="link", action="store_false",
                     help="don't create the heuristic links")
 parser.add_argument("-norecon", dest="recon", action="store_false",
-                    help="Submit a recon-all job to SGE after unpacking")
+                    help="don't run recon-all after unpacking")
 parser.add_argument("-nodwi", dest="dwi", action="store_false",
                     help="don't run dt_recon to unpack the DWI image")
 parser.add_argument("-noreg", dest="reg", action="store_false",
-                    help="don't perform FSL registration")
+                    help="don't perform FSL normalization")
 parser.add_argument("-reparse", action="store_true",
                     help="force rerunning of the dicom directory parsing")
 parser.add_argument("-reconvert", action="store_true",
@@ -56,7 +56,7 @@ parser.add_argument("-relink", action="store_true",
                     help="overwrite any old heuristic links")
 parser.add_argument("-inseries", action="store_true", 
                     help="force running nipype in series")
-parser.add_argument("-debug", action="store_true", help="turn on debugging")
+parser.add_argument("-debug", action="store_true", help="turn on debugging/verbose output")
 
 # Display help if we got less than one argument
 if len(sys.argv) < 2:
