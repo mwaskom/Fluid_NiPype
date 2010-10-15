@@ -11,7 +11,7 @@ import nipype.interfaces.freesurfer as fs
 from nipype.utils.filemanip import FileNotFoundError
 
 if len(sys.argv) < 2:
-    sys.exit("USAGE: fluid_register.py [-v -f] SUBJECT")
+    sys.exit("USAGE: fluid_normalize.py [-v -f] SUBJECT")
 
 subject = sys.argv[-1]
 force = False
