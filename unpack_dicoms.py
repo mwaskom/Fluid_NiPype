@@ -511,7 +511,7 @@ for subj in subjects:
                      os.path.exists(os.path.join(datadir, subj, "mri", "T1.mgz"))):
         # Fluid_register command line
         sgescript.append(
-            "python /mindhive/gablab/fluid/NiPype_Code/fluid_register.py %s"%subj)
+            "python /mindhive/gablab/fluid/NiPype_Code/fluid_normalize.py %s"%subj)
         print "Adding %s normalization to SGE script"%subj
     elif args.reg:
         print "Normalization requested for %s, but source images not found"%subj
