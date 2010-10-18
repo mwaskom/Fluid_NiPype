@@ -156,11 +156,15 @@ reg_pipe.connect([(sidsource, rmsgrabber, [("sid", "sid")]),
                   (anglesource, rmsgrabber, [("alpha", "alpha")])
                   ])
 
+# Convert the RMS image to nifti so BET can read it
+cvt2nii = pe.Node(fs.MRIConvert(out_type=="niigz"), name="cvt2nii")
+
+reg_pipe.connect(rmsgrabber, "flash_rms", cvt2nii, "in_file")
 
 # Skullstrip the RMS images
 stripflash = pe.Node(fsl.BET(), name="stripflash")
 
-reg_pipe.connect(rmsgrabber, "flash_rms", stripflash, "in_file")
+reg_pipe.connect(cvt2nii, "out_file", stripflash, "in_file")
 
 # Register each RMS image to the Freesurfer structural
 coregister = pe.Node(fs.BBRegister(init="fsl"),
