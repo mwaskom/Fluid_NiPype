@@ -261,9 +261,9 @@ outputnode = pe.Node(util.IdentityInterface(fields=["smoothed_timeseries",
                      name="outputspec")
 
 # Define the outputs that will go into a report
-reportnode = pe.Node(util.IdentityInterface(fields=["rotation_plots",
-                                                    "translation_plots",
-                                                    "displacement_plots"]),
+reportnode = pe.Node(util.IdentityInterface(fields=["rotation_plot",
+                                                    "translation_plot",
+                                                    "displacement_plot"]),
                      name="report")
 
 # Make connections to the output nodes
@@ -274,8 +274,8 @@ preproc.connect([
     (dilatemask,     outputnode, [("out_file", "functional_mask")]),
     (realign,        outputnode, [("par_file", "realignment_parameters")]),
     (art,            outputnode, [("outlier_files", "outlier_files")]),
-    (plotrot,        reportnode, [("out_file", "rotation_plots")]),
-    (plottrans,      reportnode, [("out_file", "translation_plots")]),
-    (plotdisp,       reportnode, [("out_file", "displacement_plots")]),
+    (plotrot,        reportnode, [("out_file", "rotation_plot")]),
+    (plottrans,      reportnode, [("out_file", "translation_plot")]),
+    (plotdisp,       reportnode, [("out_file", "displacement_plot")]),
     ])
 
