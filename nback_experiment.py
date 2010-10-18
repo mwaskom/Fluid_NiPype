@@ -3,10 +3,7 @@
 """
 import re
 
-template_args = dict(func=[["subject_id", "bold",
-                             ["NBack_run1", "NBack_run2", "NBack_run3", "NBack_run4"]]],
-                     target=[["subject_id", "structural", "ep2d_t1w"]],
-                     struct=[["subject_id", "structural", "mprage"]])
+template_args = dict(func=[["subject_id", "bold", ["NBack_run%d"]]],
 
 source_template = "%s/%s/%s.nii.gz"
 
