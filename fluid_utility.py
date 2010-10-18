@@ -3,6 +3,38 @@ from copy import deepcopy
 from nipype.interfaces.base import Bunch
 from nipype.utils.filemanip import split_filename
 
+def subject_container(workflow, subjectsource, datasinknode, stripstring="_subject_id_"):
+    
+    workflow.connect([
+        (subjectsource, datasinknode, 
+            [("subject_id", "container"),
+            (("subject_id", lambda x: "".join([stripstring,x])), "strip_dir")]),
+            ])
+
+def get_substitutions(workflow, outputnode, mergenode):
+    """Substitute the output field name for the filename for all outputs from a node
+    and send into a mergenode."""
+    outputs = outputnode.outputs.get()
+    for i, field in enumerate(outputs):
+        workflow.connect(outputnode, (field, substitute, field), mergenode, "in%d"%(i+1))
+    
+def substitute(origpath, subname):
+    """Generate a list of substitution tuples."""
+    if not isinstance(origpath, list):
+        origpath = [origpath]
+    substitutes = []
+    for path in origpath:
+        ext = split_filename(path)[2]
+        # Text files (from ART, etc.) tend to have an image 
+        # filename hanging around, so this solution is a bit
+        # messier in code but gets us better filenames.
+        if ext.startswith(".nii.gz") and not ext == ".nii.gz":
+            ext = ext[7:]
+        elif ext.endswith(".txt"):
+            ext = ".txt"
+        substitutes.append((os.path.basename(path), subname + ext))
+    return substitutes
+
 def sort_copes(files):
     numelements = len(files[0])
     outfiles = []
@@ -45,12 +77,3 @@ def subjectinfo(subject_id, exp):
                             regressors=None))
     return output
 
-def sub(origpath, subname, addrun=True):
-    if not isinstance(origpath, list):
-        origpath = [origpath]
-    _, name, ext = split_filename(subname)
-    if addrun:
-        return [(os.path.basename(path), name+"_run_%d"%(i+1)+ext)
-                    for i, path in enumerate(origpath)]
-    else:
-        return [(os.path.basename(path), subname) for path in origpath]
