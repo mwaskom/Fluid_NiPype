@@ -9,12 +9,16 @@ def main():
     # Get subject from first command line arg
     try:
         subject = sys.argv[1]
-    # Print usage and quit if didn't get a subject
+    # Print usage and quit if we didn't get a subject
     except IndexError:
-        sys.exit("\tUSAGE: generate_parfiles.py [subject_id]")
+        sys.exit("\tUSAGE: generate_parfiles.py subject_id")
 
-    # Hardcode the day (for now)
-    day = 1
+    # Figure out ante/post based on subject id
+    if subject.endswith("p"):
+        day = 2
+    else:
+        day = 1
+    
 
     matfiletemp = dict(nback="sub_%s_day%d_run%d_DUALNBACK.mat",
                        rt="sub_%s_r_%d_TEST_RT_FMRI.mat",
@@ -28,7 +32,7 @@ def main():
     srcdir = os.path.join(datadir, "fmri_bhvl")
     trgdir = os.path.join(datadir, "parfiles")
     # Make the parfile directory if it doesn't exist
-    if not os.path.isdir(trgdir): 
+    if not os.path.exists(trgdir): 
         os.mkdir(trgdir)
 
     gen_nback(matfiletemp["nback"], day, subject, srcdir, trgdir)
@@ -70,11 +74,11 @@ def gen_nback(matfiletemplate, day, subject, srcdir, trgdir):
             fid.close()
 
         # Catch the error from a missing .mat file
-        except IOError as error:
+        except IOError:
             if not os.path.exists(matfile):
                 print "ERROR: could not read %s"%matfile
             else:
-                raise error
+                raise
 
 def gen_mot(matfiletemplate, day, subject, srcdir, trgdir):
     print "\nMOT\n======="
@@ -105,16 +109,16 @@ def gen_mot(matfiletemplate, day, subject, srcdir, trgdir):
             fid.close()
 
         # Catch the error from the missing .mat file
-        except IOError as error:
+        except IOError:
             if not os.path.exists(matfile):
                 print "ERROR: could not read %s"%matfile
             else:
-                raise error
+                raise
 
 def gen_iq(matfiletemplate, day, subject, srcdir, trgdir):
     print "\nIQ\n======="
     try:
-        matfile = os.path.join(srcdir, matfiletemplate%(subject, 1, day))
+        matfile = os.path.join(srcdir, matfiletemplate%(subject, day, day))
         print "Reading %s"%matfile
         stE = scio.loadmat(matfile, struct_as_record=False, squeeze_me=True)["stE"]
         diffdict = dict(easy="LOW",hard="HIGH")
@@ -129,11 +133,11 @@ def gen_iq(matfiletemplate, day, subject, srcdir, trgdir):
             fid.close()
 
     # Catch the error from a missing .mat file
-    except IOError as error:
+    except IOError:
         if not os.path.exists(matfile):
             print "ERROR: could not read %s"%matfile
         else:
-            raise error
+            raise
 
 def gen_rt(matfiletemplate, subject, srcdir, trgdir):
     print "\nRT\n======="
