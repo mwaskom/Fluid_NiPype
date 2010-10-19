@@ -34,10 +34,10 @@ parser.add_argument("-all", action="store_true",
                     help="run all subjects with dicom dir")
 parser.add_argument("-dontunpack", nargs="*", metavar="num",
                     help="sequence number of run(s) to skip")
-parser.add_argument("-fetch", action="store_true",
-                    help="run fetch_dicoms to copy from sigma before unpacking")
 parser.add_argument("-moco", action="store_true",
                     help="unpack the MoCo BOLD runs")
+parser.add_argument("-nofetch", dest="fetch",  action="store_false",
+                    help="run fetch_dicoms to copy from sigma before unpacking")
 parser.add_argument("-norun", dest="run", action="store_false",
                     help="don't run the unpacking pipeline")
 parser.add_argument("-nolink", dest="link", action="store_false",
@@ -98,9 +98,9 @@ if args.debug:
 
 # Fetch the DICOMS
 # ----------------
-if args.fetch:
-    for subject in subjects:
-        targdir = os.path.join(datadir, subject, "dicom", args.type)
+for subject in subjects:
+    targdir = os.path.join(datadir, subject, "dicom", args.type)
+    if not os.path.exists(targdir) and args.fetch:
         os.system("fetch_dicoms -s %s -l -d %s"%(subject, targdir))
 
 # Pipeline functions
