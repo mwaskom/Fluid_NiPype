@@ -1,11 +1,10 @@
 """
-    Nipype experiment module for the jittered MOTT paradigm.
+    Nipype experiment module for the jittered MOT paradigm.
 """
 
 import re
 
-template_args = dict(func=[["subject_id", "bold", "MOT_Jitter_run1"]],
-                     struct=[["subject_id", "structural", "mprage"]])
+template_args = dict(timeseries=[["subject_id", "bold", ["MOT_Jitter_run?"]]])
 
 source_template = "%s/%s/%s.nii.gz"
 

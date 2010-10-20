@@ -3,8 +3,7 @@
 """
 import re
 
-template_args = dict(func=[["subject_id", "bold", "MOT_Block_run1"]],
-                     struct=[["subject_id", "structural", "mprage"]])
+template_args = dict(timeseries=[["subject_id", "bold", ["MOT_Block_run?"]]])
 
 source_template = "%s/%s/%s.nii.gz"
 
