@@ -507,14 +507,11 @@ for subj in subjects:
 
     # Perform spatial normalization
     # -----------------------------
-    if args.reg and (os.path.exists(os.path.join(datadir, subj, "mri", "brainmask.mgz")) and
-                     os.path.exists(os.path.join(datadir, subj, "mri", "T1.mgz"))):
+    if args.reg:
         # Fluid_register command line
         sgescript.append(
             "python /mindhive/gablab/fluid/NiPype_Code/fluid_normalize.py %s"%subj)
         print "Adding %s normalization to SGE script"%subj
-    elif args.reg:
-        print "Normalization requested for %s, but source images not found"%subj
         
     # Actually submit to Sun Grid Engine
     # ----------------------------------
@@ -526,16 +523,19 @@ for subj in subjects:
         scriptfile = os.path.join(sgedir, "%s_recon_%s.sh"%(subj, time.time()))
         fid = open(scriptfile,"w")
         fid.write("\n".join(["#! /bin/bash",
+                             "#$ -V",
                              "#$ -cwd",
                              "#$ -N %s_recon"%subj,
                              "#$ -r y",
                              "#$ -S /bin/bash",
-                             ""]))
+                             "\n"]))
         fid.write("\n".join(sgescript))
         fid.close()
-        
+        if args.debug:
+            print "SGE Script: \n", open(scriptfile).read()
+
         # Write the qsub command line
-        qsub = ["cd",sgedir,";","qsub","-q","long",scriptfile]
+        qsub = ["cd",sgedir,";","qsub","-q","long.q",scriptfile]
         cmd = " ".join(qsub)
         
         # Submit the job
@@ -547,4 +547,6 @@ for subj in subjects:
                                 shell=True,
                                 cwd=sgedir)
         stdout, stderr = proc.communicate()
+        if args.debug:
+            print stdout, stderr
         
