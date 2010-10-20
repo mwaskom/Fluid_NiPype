@@ -1,5 +1,6 @@
 import os
 from copy import deepcopy
+from datetime import datetime
 from nipype.interfaces.base import Bunch
 from nipype.utils.filemanip import split_filename
 
@@ -32,8 +33,31 @@ def substitute(origpath, subname):
             ext = ext[7:]
         elif ext.endswith(".txt"):
             ext = ".txt"
+        elif ext.endswith(".mincost"):
+            ext = ".dat"
         substitutes.append((os.path.basename(path), subname + ext))
     return substitutes
+
+def sink_outputs(workflow, outputnode, datasinknode, pathstr):
+    
+    if pathstr.endswith("."):
+        pathstr = pathstr + "@"
+    elif not pathstr.endswith(".@"):
+        pathstr = pathstr + ".@"
+    
+    outputs = outputnode.outputs.get()
+    for field in outputs:
+        workflow.connect(outputnode, field, datasinknode, pathstr + field)
+
+def archive_crashdumps(workflow):
+    """Archive crashdumps by date to NiPype_Code directory"""
+    datestamp = str(datetime.now())[:10]
+    codepath = os.path.split(os.path.abspath(__file__))[0]
+    crashdir = os.path.abspath("%s/crashdumps/%s" % (codepath, datestamp))
+    if not os.path.isdir(crashdir):    
+        os.makedirs(crashdir)
+    workflow.config = dict(crashdump_dir=crashdir) 
+
 
 def sort_copes(files):
     numelements = len(files[0])
