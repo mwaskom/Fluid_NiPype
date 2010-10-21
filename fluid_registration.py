@@ -1,4 +1,5 @@
 import nipype.pipeline.engine as pe
+import nippye.interfaces.io as nio
 import nipype.interfaces.fsl as fsl
 import nipype.interfaces.freesurfer as fs
 import nipype.interfaces.utility as util
@@ -9,7 +10,6 @@ registration = pe.Workflow(name="registration")
 # Define the inputs for the registation workflow
 inputnode = pe.Node(interface=util.IdentityInterface(fields=["subject_id",
                                                              "warpfield",
-                                                             "brainmask",
                                                              "example_func",
                                                              "vol_timeseries",
                                                              "surf_timeseries"]),
@@ -17,6 +17,7 @@ inputnode = pe.Node(interface=util.IdentityInterface(fields=["subject_id",
 
 func2anat = pe.MapNode(interface=fs.BBRegister(contrast_type="t2",
                                                init="fsl",
+                                               epi_mask=True,
                                                registered_file=True,
                                                out_fsl_file=True),
                        iterfield=["source_file"],
@@ -27,6 +28,9 @@ func2anatpng = pe.MapNode(interface=fsl.Slicer(middle_slices=True,
                                                label_slices=False),
                           iterfield=["in_file"],
                           name="func2anatpng")
+
+fssource  = pe.Node(interface=nio.FreeSurferSource(subject_dir=fs.Info.subjectsdir()),
+                    name="fssource")
 
 mni152 = fsl.Info.standard_image("avg152T1.nii.gz")
 mni152_brain = fsl.Info.standard_image("avg152T1_brain.nii.gz")
@@ -63,7 +67,7 @@ registration.connect([
                                     ("vol_timeseries", "in_file")]),
     (inputnode,    warpex,         [("warpfield", "field_file"),
                                     ("example_func", "in_file")]),
-    (inputnode,    func2anatpng,   [("brainmask", "image_edges")]),
+    (fssource,     func2anatpng,   [("brain", "image_edges")]),
     (func2anat,    func2anatpng,   [("registered_file", "in_file")]),
     (func2anat,    warpts,         [("out_fsl_file", "premat")]),
     (func2anat,    warpex,         [("out_fsl_file", "premat")]),
