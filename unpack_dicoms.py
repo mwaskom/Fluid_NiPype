@@ -38,7 +38,7 @@ parser.add_argument("-moco", action="store_true",
                     help="unpack the MoCo BOLD runs")
 parser.add_argument("-nofetch", dest="fetch",  action="store_false",
                     help="run fetch_dicoms to copy from sigma before unpacking")
-parser.add_argument("-norun", dest="run", action="store_false",
+parser.add_argument("-nopype", dest="pype", action="store_false",
                     help="don't run the unpacking pipeline")
 parser.add_argument("-nolink", dest="link", action="store_false",
                     help="don't create the heuristic links")
@@ -357,7 +357,7 @@ if not os.path.isdir(crashdir):
 unpack.config = dict(crashdump_dir=crashdir) 
 
 # Run the pipeline
-if args.run:
+if args.pype:
     unpack.run(inseries=args.inseries)
 
     # Log archiving
