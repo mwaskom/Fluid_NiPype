@@ -13,7 +13,7 @@ import nipype.interfaces.freesurfer as fs
 import nipype.interfaces.utility as util
 
 from fluid_preproc import preproc
-from fluid_source import infosource, datasource
+from fluid_registration import registration
 
 import fluid_utility as flutil
 
@@ -81,6 +81,7 @@ preprocsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
                                         outfields=["timeseries"],
                                         base_directory=data_dir,
                                         template=exp.source_template,
+                                        sort_filelist=True,
                                         ),
                         name="preprocsource")
 preprocsource.inputs.template_args = exp.template_args
@@ -106,17 +107,17 @@ flutil.get_substitutions(preproc, preproc_report, preprocreportsub)
 # Preproc node substitutions
 # NOTE: It would be nice if this were more intuitive, but I haven't
 # figured out a good way.  Have to hardcode the node names for now.
-sinknodesubs = []
+preprocsinknodesubs = []
 # Shouldn't hurt anything if we just get the maximum number
 # of substitutions, although it's a bit messy.
 for r in range(4):
     for node in ["art", "dilatemask", "highpass", "masksmoothfunc", "meanfunc2", "realign"]:
-        sinknodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
+        preprocsinknodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
 
-reportnodesubs = []
+preprocreportnodesubs = []
 for r in range(4):
     for plot in ["displacement", "rotation", "translation"]:
-        reportnodesubs.append(("_plot%s%d"%(plot, r), "run_%d"%(r+1)))
+        preprocreportnodesubs.append(("_plot%s%d"%(plot, r), "run_%d"%(r+1)))
 
 # Preproc connections
 preproc.connect([
@@ -124,41 +125,126 @@ preproc.connect([
         [("subject_id", "subject_id")]),
     (preprocsource,    preproc_input, 
         [("timeseries", "timeseries")]),
-    (preproc_output,   preprocsink,   
-        [("unsmoothed_timeseries", "preproc.@unsmoothed_timeseries")]),
-    (preproc_output,   preprocsink,
-        [("smoothed_timeseries", "preproc.@smoothed_timeseries")]),
-    (preproc_output,   preprocsink,
-        [("example_func", "preproc.@example_func")]),
-    (preproc_output,   preprocsink,
-        [("functional_mask", "preproc.@functional_mask")]),
-    (preproc_output,   preprocsink,
-        [("realignment_parameters", "preproc.@realignment_parameters")]),
-    (preproc_output,   preprocsink,
-        [("outlier_files","preproc.@outlier_files")]),
-    (preproc_report,   preprocreport,
-        [("rotation_plot", "preproc.@rotation_plot")]),
-    (preproc_report,   preprocreport,
-        [("translation_plot", "preproc.@translation_plot")]),
-    (preproc_report,   preprocreport,
-        [("displacement_plot", "preproc.@displacement_plot")]),
     (preprocsinksub,   preprocsink,
-        [(("out", lambda x: sinknodesubs + x), "substitutions")]),
+        [(("out", lambda x: preprocsinknodesubs + x), "substitutions")]),
     (preprocreportsub, preprocreport,
-        [(("out", lambda x: reportnodesubs + x), "substitutions")]),
+        [(("out", lambda x: preprocreportnodesubs + x), "substitutions")]),
     ])
-
 # Set up the subject containers
 flutil.subject_container(preproc, subjectsource, preprocsink)
 flutil.subject_container(preproc, subjectsource, preprocreport)
 
+# Connect the heuristic outputs to the datainks
+flutil.sink_outputs(preproc, preproc_output, preprocsink, "preproc")
+flutil.sink_outputs(preproc, preproc_report, preprocreport, "preproc")
+
 # Set up the working output
 preproc.base_dir = working_dir
+
+# Archive crashdumps
+flutil.archive_crashdumps(preproc)
 
 # Set the other preprocessing inputs
 preproc_input.inputs.hpf_cutoff = exp.hpcutoff/exp.TR
 preproc_input.inputs.smooth_fwhm = 5
 
+
+# Registration
+# ------------
+
+# Get registration input and output
+reg_input = registration.get_node("inputspec")
+reg_output = registration.get_node("outputspec")
+reg_report = registration.get_node("report")
+
+# Registration datasource node
+regsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
+                                    outfields=["example_func", "warpfield",
+                                               "vol_timeseries", "surf_timeseries"],
+                                    base_directory = project_dir,
+                                    sort_filelist=True),
+                    name="regsource")
+
+regsource.inputs.template = "Analysis/NiPype/" + args.paradigm + "/%s/preproc/run_?/%s.nii.gz"
+regsource.inputs.field_template = dict(warpfield="Data/%s/registration/%s.nii.gz")
+regsource.inputs.template_args = dict(example_func=[["subject_id", "example_func"]],
+                                      vol_timeseries=[["subject_id", "smoothed_timeseries"]],
+                                      surf_timeseries=[["subject_id", "unsmoothed_timeseries"]],
+                                      warpfield=[["subject_id","warpfield"]])
+
+# Registration Datasink nodes
+regsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
+                  name="regsink")
+
+regreport = pe.Node(nio.DataSink(base_directory=report_dir),
+                    name="regreport")
+
+# Registration filename substitutions
+regsinksub = pe.Node(util.Merge(len(reg_output.outputs.__dict__.keys())),
+                     name="regsinksub")
+
+flutil.get_substitutions(registration, reg_output, regsinksub)
+
+regreportsub = pe.Node(util.Merge(len(reg_report.outputs.__dict__.keys())),
+                       name="regreportsub")
+
+flutil.get_substitutions(registration, reg_report, regreportsub)
+
+# Registration node substitutions
+# NOTE: It would be nice if this were more intuitive, but I haven't
+# figured out a good way.  Have to hardcode the node names for now.
+regsinknodesubs = []
+# Shouldn't hurt anything if we just get the maximum number
+# of substitutions, although it's a bit messy.
+for r in range(4):
+    for node in ["func2anat","warptimeseries"]:
+        regsinknodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
+
+regreportnodesubs = []
+for r in range(4):
+    for node in ["exfuncwarppng", "func2anat", "func2anatpng"]:
+        regreportnodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
+
+# Registration connections
+registration.connect([
+    (subjectsource, regsource,  
+        [("subject_id", "subject_id")]),
+    (subjectsource, reg_input,
+        [("subject_id", "subject_id")]),
+    (regsource,     reg_input,  
+        [("vol_timeseries", "vol_timeseries"),
+         ("surf_timeseries", "surf_timeseries"),
+         ("example_func", "example_func"),
+         ("warpfield", "warpfield")]),
+    (regsinksub,   regsink,
+        [(("out", lambda x: regsinknodesubs + x), "substitutions")]),
+    (regreportsub, regreport,
+        [(("out", lambda x: regreportnodesubs + x), "substitutions")]),
+    ])
+
+# Set up the subject containers
+flutil.subject_container(registration, subjectsource, regsink)
+flutil.subject_container(registration, subjectsource, regreport)
+
+# Connect the heuristic outputs to the datainks
+flutil.sink_outputs(registration, reg_output, regsink, "registration")
+flutil.sink_outputs(registration, reg_report, regreport, "registration")
+
+# Registration working output
+registration.base_dir = working_dir
+
+# Set crashdumps
+flutil.archive_crashdumps(registration)
+
 if __name__ == "__main__":
     if args.run:
+        
         preproc.run(inseries=args.inseries)
+        for subj in subject_list:
+            os.system("python /mindhive/gablab/fluid/NiPype_Code/build_subj_report.py %s"%subj)
+        os.system("python /mindhive/gablab/fluid/NiPype_Code/build_report_homepage.py")
+        
+        registration.run(inseries=args.inseries)
+        for subj in subject_list:
+            os.system("python /mindhive/gablab/fluid/NiPype_Code/build_subj_report.py %s"%subj)
+        os.system("python /mindhive/gablab/fluid/NiPype_Code/build_report_homepage.py")
