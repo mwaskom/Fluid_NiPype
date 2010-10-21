@@ -30,14 +30,14 @@ fnirt_cfg = "/usr/share/fsl/4.1/etc/flirtsch/T1_2_MNI152_2mm.cnf"
 subjdir = os.path.join("/mindhive/gablab/fluid/Data", subject)
 
 # Get recon images
-brainmask_mgz = os.path.join(subjdir, "mri/brainmask.mgz")
+brain_mgz = os.path.join(subjdir, "mri/brain.mgz")
 t1_mgz = os.path.join(subjdir, "mri/T1.mgz")
 
 # Define the images to write
-brainmask = "brainmask.nii.gz"
+brain = "brain.nii.gz"
 t1 = "T1.nii.gz"
 
-brainmask_flirted = "brainmask_flirted.nii.gz"
+brain_flirted = "brain_flirted.nii.gz"
 t1_fnirted = "T1_fnirted.nii.gz"
 
 flirtmat = "affine.mat"
@@ -65,8 +65,8 @@ def log(interface, result):
 
 try:
     # Brainmask to nifti
-    cvt = fs.MRIConvert(in_file=brainmask_mgz, out_file=brainmask)
-    if force or not os.path.exists(brainmask):
+    cvt = fs.MRIConvert(in_file=brain_mgz, out_file=brain)
+    if force or not os.path.exists(brain):
         res = cvt.run()
         log(cvt, res)
 
@@ -76,15 +76,15 @@ try:
         res = cvt.run()
         log(cvt, res)
 
-    # FLIRT brainmask to mni152_brain
-    flirt = fsl.FLIRT(in_file         = brainmask, 
+    # FLIRT brain to mni152_brain
+    flirt = fsl.FLIRT(in_file         = brain, 
                       reference       = target_brain,
-                      out_file        = brainmask_flirted,
+                      out_file        = brain_flirted,
                       out_matrix_file = flirtmat,
                       searchr_x       = [-180, 180],
                       searchr_y       = [-180, 180],
                       searchr_z       = [-180, 180])
-    if force or (not os.path.exists(brainmask_flirted) or not os.path.exists(flirtmat)):
+    if force or (not os.path.exists(brain_flirted) or not os.path.exists(flirtmat)):
         res = flirt.run()
         log(flirt, res)
 
