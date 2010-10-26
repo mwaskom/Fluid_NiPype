@@ -3,6 +3,7 @@ import re
 import sys
 import shutil
 import argparse
+import inspect
 from copy import deepcopy
 from datetime import datetime
 
@@ -11,9 +12,11 @@ import nipype.interfaces.io as nio
 import nipype.interfaces.fsl as fsl
 import nipype.interfaces.freesurfer as fs
 import nipype.interfaces.utility as util
+from nipype.interfaces.base import Bunch
 
 from fluid_preproc import preproc
 from fluid_registration import registration
+from fluid_fsl_model import fsl_model
 
 import fluid_utility as flutil
 
@@ -35,7 +38,7 @@ args = parser.parse_args()
 # Get the paradigm from the command line, or use the 
 # IQ paradigm by default (so this can be importable)
 if args.paradigm is not None:
-    exp = __import__("%s_experiment" % args.paradigm)
+    exp = __import__("%s_experiment"%args.paradigm)
 else:
     import iq_experiment as exp
     args.paradigm = "iq"
@@ -236,9 +239,188 @@ registration.base_dir = working_dir
 # Set crashdumps
 flutil.archive_crashdumps(registration)
 
+# First-Level Model
+# -----------------
+
+# Moderate hack to strip deepcopy offensive stuff from an experiment module
+# Fixes bug in Python(!)
+class Foo(object): pass
+experiment = Foo()
+for k,v in exp.__dict__.items():
+    if not k.startswith("__") and not inspect.ismodule(v):
+        setattr(experiment, k, v)
+
+# Model relevant functions
+def count_runs(runs):
+    """Count the number of functional timeseries globbed for each subject."""
+    if not isinstance(runs, list):
+        runs = [runs]
+    return len(runs)
+
+def get_contrast_idx(contrast_name):
+    """Return the index corresponding to the name of a contrast."""
+    return [i for i, data in enumerate(exp.contrasts) if data[0] == contrast_name]
+
+def subjectinfo(info, exp):
+    """Return a subjectinfo list of bunches.  
+
+    Parameters
+    ----------
+    info : list
+        [subject_id, nruns]
+    exp : experiment object
+        Basically an experiment module stipped of deepcopy-offensive stuff
+
+    """
+    subject_id = info[0]
+    nruns = info[1]
+    output = []
+    events = exp.events
+    for r in range(nruns):
+        run_number = r+1
+        onsets = []
+        durations = []        
+        for event in events:
+
+            # Get a path to the parfile for this event
+            vars = locals()
+            arg_tuple = tuple([vars[arg] for arg in exp.parfile_args])
+            parfile = os.path.join(exp.parfile_base_dir, exp.parfile_template%arg_tuple)
+            
+            # Get the event onsets and durations from the parfile
+            o, d = flutil.parse_par_file(parfile)
+            onsets.append(o)
+            durations.append(d)
+
+        output.insert(r,
+                      Bunch(conditions=events,
+                            onsets=deepcopy(onsets),
+                            durations=deepcopy(durations),
+                            amplitudes=None,
+                            tmod=None,
+                            pmod=None,
+                            regressor_names=None,
+                            regressors=None))
+    return output
+
+# Set the template and args for the timeseries in each space
+timeseries_template = dict(volume = dict(
+    timeseries=os.path.join("Analysis/NiPype",args.paradigm,"%s/registration/run_?/%s.nii.gz")))
+
+timeseries_args = dict(volume= [["subject_id", "warped_timeseries"]])
+
+# Set up the model workflow for each space 
+
+model = fsl_model.clone("volume_model")
+
+# Get model input and output
+model_input = model.get_node("inputspec")
+model_output = model.get_node("outputspec")
+model_report = model.get_node("report")
+
+# Set up the date sources for each space
+modelsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
+                                      outfields=["timeseries",
+                                                 "outlier_files",
+                                                 "realignment_parameters"],
+                                      base_directory = project_dir,
+                                      sort_filelist=True),
+                      name="modelsource")
+
+modelsource.inputs.template = os.path.join(
+    "Analysis/NiPype",args.paradigm ,"%s/preproc/run_?/%s")
+
+modelsource.inputs.template_args = dict(
+    outlier_files=[["subject_id", "outlier_files.txt"]],
+    realignment_parameters=[["subject_id", "realignment_parameters.par"]])
+modelsource.inputs.field_template = timeseries_template["volume"]
+modelsource.inputs.template_args["timeseries"] = timeseries_args["volume"]
+
+# Model Datasink nodes
+modelsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
+                  name="modelsink")
+
+modelreport = pe.Node(nio.DataSink(base_directory=report_dir),
+                    name="modelreport")
+
+modelreportsub = pe.Node(util.Merge(len(model_report.outputs.__dict__.keys())),
+                       name="modelreportsub")
+
+flutil.get_substitutions(model, model_report, modelreportsub)
+
+# Model node substitutions
+# NOTE: It would be nice if this were more intuitive, but I haven't
+# figured out a good way.  Have to hardcode the node names for now.
+modelsinknodesubs = []
+# Shouldn't hurt anything if we just get the maximum number
+# of substitutions, although it's a bit messy.
+for r in range(4):
+    for node in ["modelestimate"]:
+        modelsinknodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
+modelsink.inputs.substitutions = modelsinknodesubs
+
+modelreportnodesubs = [("_contrast_","stats/")]
+for r in range(4):
+    for node in ["modelgen", "sliceresidual", "slicestats"]:
+        modelreportnodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
+
+# Define a node to seed the contrasts iterables with the contrast name
+connames = pe.Node(util.IdentityInterface(fields=["contrast"]),
+                   iterables = ("contrast", [c[0] for c in exp.contrasts]),
+                   name="contrastnames")
+
+# Get a reference to the selectcontrast node
+selectcontrast = model.get_node("selectcontrast")
+
+# Define a node to count the number of functional runs
+# and merge that with the subject_id to pass to the 
+# subjectinfo function
+runinfo = pe.Node(util.Merge(2), name="runinfo")
+
+# Model connections
+model.connect([
+    (subjectsource, modelsource,  
+        [("subject_id", "subject_id")]),
+    (subjectsource, runinfo,
+        [("subject_id", "in1")]),
+    (modelsource, runinfo,
+        [(("timeseries", count_runs), "in2")]),
+    (runinfo, model_input,
+        [(("out", subjectinfo, experiment), "subject_info")]),
+    (modelsource, model_input,  
+        [("timeseries", "timeseries"),
+         ("outlier_files", "outlier_files"),
+         ("realignment_parameters", "realignment_parameters")]),
+    (connames, selectcontrast,
+        [(("contrast", get_contrast_idx), "index")]),
+    (modelreportsub, modelreport,
+        [(("out", lambda x: modelreportnodesubs + x), "substitutions")]),
+    ])
+
+# Set up the subject containers
+flutil.subject_container(model, subjectsource, modelsink)
+flutil.subject_container(model, subjectsource, modelreport)
+
+# Connect the heuristic outputs to the datainks
+flutil.sink_outputs(model, model_output, modelsink, "model.%s"%"volume")
+flutil.sink_outputs(model, model_report, modelreport, "model.%s"%"space")
+
+# Set the other model inputs
+model_input.inputs.TR = exp.TR
+model_input.inputs.units = exp.units
+model_input.inputs.hpf_cutoff = exp.hpcutoff
+model_input.inputs.HRF_bases = exp.fsl_bases
+model_input.inputs.contrasts = exp.contrasts
+
+# Volume model working output
+model.base_dir = working_dir
+
+# Set crashdumps
+flutil.archive_crashdumps(model)
+
 if __name__ == "__main__":
     if args.run:
-        
+        """   
         preproc.run(inseries=args.inseries)
         for subj in subject_list:
             os.system("python /mindhive/gablab/fluid/NiPype_Code/build_subj_report.py %s"%subj)
@@ -248,3 +430,5 @@ if __name__ == "__main__":
         for subj in subject_list:
             os.system("python /mindhive/gablab/fluid/NiPype_Code/build_subj_report.py %s"%subj)
         os.system("python /mindhive/gablab/fluid/NiPype_Code/build_report_homepage.py")
+        """
+        model.run(inseries=args.inseries)
