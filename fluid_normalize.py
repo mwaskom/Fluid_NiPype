@@ -30,8 +30,8 @@ fnirt_cfg = "/usr/share/fsl/4.1/etc/flirtsch/T1_2_MNI152_2mm.cnf"
 subjdir = os.path.join("/mindhive/gablab/fluid/Data", subject)
 
 # Get recon images
-brain_mgz = os.path.join(subjdir, "mri/brain.mgz")
-t1_mgz = os.path.join(subjdir, "mri/T1.mgz")
+brain_mgz = os.path.join(subjdir, "mri/norm.mgz")
+t1_mgz = os.path.join(subjdir, "mri/nu.mgz")
 
 # Define the images to write
 brain = "brain.nii.gz"
