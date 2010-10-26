@@ -507,7 +507,7 @@ for subj in subjects:
 
     # Perform spatial normalization
     # -----------------------------
-    if args.reg:
+    if args.reg and os.path.exists(os.path.join(datadir, subj, "mri/orig/001.mgz")):
         # Fluid_register command line
         sgescript.append(
             "python /mindhive/gablab/fluid/NiPype_Code/fluid_normalize.py %s"%subj)
