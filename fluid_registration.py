@@ -1,5 +1,5 @@
 import nipype.pipeline.engine as pe
-import nippye.interfaces.io as nio
+import nipype.interfaces.io as nio
 import nipype.interfaces.fsl as fsl
 import nipype.interfaces.freesurfer as fs
 import nipype.interfaces.utility as util
@@ -29,7 +29,7 @@ func2anatpng = pe.MapNode(interface=fsl.Slicer(middle_slices=True,
                           iterfield=["in_file"],
                           name="func2anatpng")
 
-fssource  = pe.Node(interface=nio.FreeSurferSource(subject_dir=fs.Info.subjectsdir()),
+fssource  = pe.Node(interface=nio.FreeSurferSource(subjects_dir=fs.Info.subjectsdir()),
                     name="fssource")
 
 mni152 = fsl.Info.standard_image("avg152T1.nii.gz")
