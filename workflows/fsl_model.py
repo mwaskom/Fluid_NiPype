@@ -48,10 +48,10 @@ overlayres = pe.MapNode(fsl.Overlay(auto_thresh_bg=True,
                         name="overlayresidual",
                         iterfield = ["stat_image", "stat_thresh"])
 
-sliceres = pe.MapNode(fsl.Slicer(image_width=800,
-                                 sample_axial=2),
+sliceres = pe.MapNode(fsl.Slicer(image_width=872),
                       name="sliceresidual",
                       iterfield=["in_file"])
+sliceres.inputs.sample_axial = 2
 
 contrastestimate = pe.MapNode(fsl.ContrastMgr(), name="contrastestimate",
                               iterfield = ["tcon_file","stats_dir"])
@@ -67,10 +67,10 @@ overlaystats = pe.MapNode(fsl.Overlay(stat_thresh=(2.3,10),
                           name="overlaystats",
                           iterfield = ["stat_image"])
                      
-slicestats = pe.MapNode(fsl.Slicer(image_width=800,
-                                   sample_axial=2),
+slicestats = pe.MapNode(fsl.Slicer(image_width=872),
                         name="slicestats",
                         iterfield=["in_file"])
+slicestats.inputs.sample_axial = 2
 
 outputnode = pe.Node(util.IdentityInterface(fields=["results",
                                                     "copes",
