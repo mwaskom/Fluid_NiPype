@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import imp
 import shutil
 import argparse
 import inspect
@@ -14,9 +15,10 @@ import nipype.interfaces.freesurfer as fs
 import nipype.interfaces.utility as util
 from nipype.interfaces.base import Bunch
 
-from fluid_preproc import preproc
-from fluid_registration import registration
-from fluid_fsl_model import fsl_model
+from workflows.preproc import preproc
+from workflows.registration import registration
+from workflows.fsl_model import fsl_model
+#from workflows.fluid_fixed_fx import fixed_fx
 
 import fluid_utility as flutil
 
@@ -27,36 +29,50 @@ parser.add_argument("-paradigm", metavar="paradigm",
                     help="experimental paradigm")
 parser.add_argument("-subjects", nargs="*",
                     metavar="subject_id",
-                    help="run pypeline for subject(s)")
+                    help="process subject(s)")
+parser.add_argument("-workflows", nargs="*",
+                    metavar="WF",
+                    help="which workflows to run")
 parser.add_argument("-norun",dest="run",action="store_false",
                     help="do not run the pypeline")
 parser.add_argument("-inseries",action="store_true",
                     help="force running in series")
 args = parser.parse_args()
 
+# Define a default paradigm, for importability and convenince
+default_paradigm = "iq"
+
 # Dynamically import the experiment file
 # Get the paradigm from the command line, or use the 
 # IQ paradigm by default (so this can be importable)
-if args.paradigm is not None:
+if args.paradigm is None:
+    args.paradigm = default_paradigm
+try:   
+    exp = __import__("experiments.%s_experiment"%args.paradigm,
+                     fromlist=["experiments"])
+except ImportError:
     exp = __import__("%s_experiment"%args.paradigm)
-else:
-    import iq_experiment as exp
-    args.paradigm = "iq"
+
+if args.workflows is None:
+    args.workflows = []
+elif args.workflows == ["all"]:
+    args.workflows = ["preproc", "reg", "model"]
 
 # Determine the subjects list
 # Hierarchy:
 # - Command line
 # - Subject list defined in experiment module
 # - Default subject list, with exclusions from experiment module
-if hasattr(exp, "subject_list"):
+if args.subjects is not None:
+    subject_list = args.subjects
+elif hasattr(exp, "subject_list"):
     subject_list = exp.subject_list
 else:
     subject_list = ["gf%02d"%id for id in [4, 5, 9, 13, 14]]
+
 if hasattr(exp, "exclude_subjects"):
     subject_list = [s for s in subject_list if s not in exp.exclude_subjects]
 
-if args.subjects is not None:
-    subject_list = args.subjects
 
 # Define some paths
 project_dir = "/mindhive/gablab/fluid"
@@ -113,26 +129,31 @@ flutil.get_substitutions(preproc, preproc_report, preprocreportsub)
 preprocsinknodesubs = []
 # Shouldn't hurt anything if we just get the maximum number
 # of substitutions, although it's a bit messy.
-for r in range(4):
-    for node in ["art", "dilatemask", "highpass", "masksmoothfunc", "meanfunc2", "realign"]:
+for r in range(exp.nruns):
+    for node in ["art", "dilatemask", "highpass", "masksmoothfunc", 
+                 "extractref", "meanfunc2", "realign"]:
         preprocsinknodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
 
 preprocreportnodesubs = []
-for r in range(4):
+for r in range(exp.nruns):
     for plot in ["displacement", "rotation", "translation"]:
         preprocreportnodesubs.append(("_plot%s%d"%(plot, r), "run_%d"%(r+1)))
+    for img in ["example", "mean"]:
+        preprocreportnodesubs.append(("_%sslice%d"%(img, r), "run_%d"%(r+1)))
 
 # Preproc connections
 preproc.connect([
     (subjectsource,    preprocsource, 
         [("subject_id", "subject_id")]),
-    (preprocsource,    preproc_input, 
-        [("timeseries", "timeseries")]),
     (preprocsinksub,   preprocsink,
         [(("out", lambda x: preprocsinknodesubs + x), "substitutions")]),
     (preprocreportsub, preprocreport,
         [(("out", lambda x: preprocreportnodesubs + x), "substitutions")]),
     ])
+
+# Input connections
+flutil.connect_inputs(preproc, preprocsource, preproc_input)
+
 # Set up the subject containers
 flutil.subject_container(preproc, subjectsource, preprocsink)
 flutil.subject_container(preproc, subjectsource, preprocreport)
@@ -162,7 +183,7 @@ reg_report = registration.get_node("report")
 
 # Registration datasource node
 regsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
-                                    outfields=["example_func", "warpfield",
+                                    outfields=["warpfield", "mean_func",
                                                "vol_timeseries", "surf_timeseries"],
                                     base_directory = project_dir,
                                     sort_filelist=True),
@@ -170,7 +191,8 @@ regsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
 
 regsource.inputs.template = "Analysis/NiPype/" + args.paradigm + "/%s/preproc/run_?/%s.nii.gz"
 regsource.inputs.field_template = dict(warpfield="Data/%s/registration/%s.nii.gz")
-regsource.inputs.template_args = dict(example_func=[["subject_id", "example_func"]],
+regsource.inputs.template_args = dict(mean_func=[["subject_id", "mean_func"]],
+                                      example_func=[["subject_id", "example_func"]],
                                       vol_timeseries=[["subject_id", "smoothed_timeseries"]],
                                       surf_timeseries=[["subject_id", "unsmoothed_timeseries"]],
                                       warpfield=[["subject_id","warpfield"]])
@@ -199,12 +221,12 @@ flutil.get_substitutions(registration, reg_report, regreportsub)
 regsinknodesubs = []
 # Shouldn't hurt anything if we just get the maximum number
 # of substitutions, although it's a bit messy.
-for r in range(4):
+for r in range(exp.nruns):
     for node in ["func2anat","warptimeseries"]:
         regsinknodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
 
 regreportnodesubs = []
-for r in range(4):
+for r in range(exp.nruns):
     for node in ["exfuncwarppng", "func2anat", "func2anatpng"]:
         regreportnodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
 
@@ -214,16 +236,14 @@ registration.connect([
         [("subject_id", "subject_id")]),
     (subjectsource, reg_input,
         [("subject_id", "subject_id")]),
-    (regsource,     reg_input,  
-        [("vol_timeseries", "vol_timeseries"),
-         ("surf_timeseries", "surf_timeseries"),
-         ("example_func", "example_func"),
-         ("warpfield", "warpfield")]),
     (regsinksub,   regsink,
         [(("out", lambda x: regsinknodesubs + x), "substitutions")]),
     (regreportsub, regreport,
         [(("out", lambda x: regreportnodesubs + x), "substitutions")]),
     ])
+
+# Connect the inputs
+flutil.connect_inputs(registration, regsource, reg_input)
 
 # Set up the subject containers
 flutil.subject_container(registration, subjectsource, regsink)
@@ -242,7 +262,7 @@ flutil.archive_crashdumps(registration)
 # First-Level Model
 # -----------------
 
-# Moderate hack to strip deepcopy offensive stuff from an experiment module
+# Moderate hack to strip deepcopy-offensive stuff from an experiment module
 # Fixes bug in Python(!)
 class Foo(object): pass
 experiment = Foo()
@@ -354,13 +374,13 @@ flutil.get_substitutions(model, model_report, modelreportsub)
 modelsinknodesubs = []
 # Shouldn't hurt anything if we just get the maximum number
 # of substitutions, although it's a bit messy.
-for r in range(4):
+for r in range(exp.nruns):
     for node in ["modelestimate"]:
         modelsinknodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
 modelsink.inputs.substitutions = modelsinknodesubs
 
 modelreportnodesubs = [("_contrast_","stats/")]
-for r in range(4):
+for r in range(exp.nruns):
     for node in ["modelgen", "sliceresidual", "slicestats"]:
         modelreportnodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
 
@@ -387,15 +407,14 @@ model.connect([
         [(("timeseries", count_runs), "in2")]),
     (runinfo, model_input,
         [(("out", subjectinfo, experiment), "subject_info")]),
-    (modelsource, model_input,  
-        [("timeseries", "timeseries"),
-         ("outlier_files", "outlier_files"),
-         ("realignment_parameters", "realignment_parameters")]),
     (connames, selectcontrast,
         [(("contrast", get_contrast_idx), "index")]),
     (modelreportsub, modelreport,
         [(("out", lambda x: modelreportnodesubs + x), "substitutions")]),
     ])
+
+# Connect inputs
+flutil.connect_inputs(model, modelsource, model_input)
 
 # Set up the subject containers
 flutil.subject_container(model, subjectsource, modelsink)
@@ -403,7 +422,7 @@ flutil.subject_container(model, subjectsource, modelreport)
 
 # Connect the heuristic outputs to the datainks
 flutil.sink_outputs(model, model_output, modelsink, "model.%s"%"volume")
-flutil.sink_outputs(model, model_report, modelreport, "model.%s"%"space")
+flutil.sink_outputs(model, model_report, modelreport, "model.%s"%"volume")
 
 # Set the other model inputs
 model_input.inputs.TR = exp.TR
@@ -418,17 +437,23 @@ model.base_dir = working_dir
 # Set crashdumps
 flutil.archive_crashdumps(model)
 
+# Across-run Fixed Fx
+
+
+
 if __name__ == "__main__":
     if args.run:
-        """   
-        preproc.run(inseries=args.inseries)
-        for subj in subject_list:
-            os.system("python /mindhive/gablab/fluid/NiPype_Code/build_subj_report.py %s"%subj)
-        os.system("python /mindhive/gablab/fluid/NiPype_Code/build_report_homepage.py")
+        if __file__ == "fluid_fmri.py":
+            report_script = "python /mindhive/gablab/fluid/NiPype_Code/reporting/build_report.py "
         
-        registration.run(inseries=args.inseries)
-        for subj in subject_list:
-            os.system("python /mindhive/gablab/fluid/NiPype_Code/build_subj_report.py %s"%subj)
-        os.system("python /mindhive/gablab/fluid/NiPype_Code/build_report_homepage.py")
-        """
-        model.run(inseries=args.inseries)
+        if "preproc" in args.workflows:
+            preproc.run(inseries=args.inseries)
+            os.system(report_script + " ".join(subject_list))
+        
+        if "reg" in args.workflows:
+            registration.run(inseries=args.inseries)
+            os.system(report_script + " ".join(subject_list))
+        
+        if "model" in args.workflows:
+            model.run(inseries=args.inseries)
+            os.system(report_script + " ".join(subject_list))
