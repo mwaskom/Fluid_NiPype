@@ -4,8 +4,11 @@ from datetime import datetime
 from nipype.interfaces.base import Bunch
 from nipype.utils.filemanip import split_filename
 
-def subject_container(workflow, subjectsource, datasinknode, stripstring="_subject_id_"):
+def subject_container(workflow, subjectsource, datasinknode, stripstring=None):
     
+    if stripstring is None:
+        outputs = subjectsource.outputs.get()
+        stripstring = "_%s_"%outputs.keys()[0]
     workflow.connect([
         (subjectsource, datasinknode, 
             [("subject_id", "container"),
@@ -33,10 +36,22 @@ def substitute(origpath, subname):
             ext = ext[7:]
         elif ext.endswith(".txt"):
             ext = ".txt"
+        # .mincost is a dumb extension
         elif ext.endswith(".mincost"):
             ext = ".dat"
         substitutes.append((os.path.basename(path), subname + ext))
     return substitutes
+
+def connect_inputs(workflow, datagrabber, inputnode):
+    """Connect the outputs of a Datagrabber to an inputnode.
+
+    The names of the datagrabber outfields and the inputnode fields must match.
+    """
+    inputs = inputnode.inputs.get()
+    outputs = datagrabber.outputs.get()
+    fields = [f for f in inputs if f in outputs]
+    for field in fields:
+        workflow.connect(datagrabber, field, inputnode, field)
 
 def sink_outputs(workflow, outputnode, datasinknode, pathstr):
     
