@@ -4,22 +4,22 @@ Fluid Intelligence Project Analysis Code
 Functional Analysis
 -------------------
 
-``fluid_nipype.py`` -- 
+``fluid_fmri.py`` -- 
 Main interface for functional analysis
 
 ``fluid_source.py`` -- 
 Source utility nodes
 
-``fluid_preproc.py`` -- 
+``preproc.py`` -- 
 Preprocessing
 
-``fluid_fsl_model.py`` -- 
+``fsl_model.py`` -- 
 First-level FSL modelfitting 
 
-``fluid_spm_model.py`` -- 
+``spm_model.py`` -- 
 First-level SPM modelfitting
 
-``fluid_fixed_fx.py`` -- 
+``fixed_fx.py`` -- 
 Second-level (within-subject) fixed-effect analysis
 
 Experiment Modules
