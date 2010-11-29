@@ -1,7 +1,5 @@
 import os
-from copy import deepcopy
 from datetime import datetime
-from nipype.interfaces.base import Bunch
 from nipype.utils.filemanip import split_filename
 
 def subject_container(workflow, subjectsource, datasinknode, stripstring=None):
@@ -15,13 +13,6 @@ def subject_container(workflow, subjectsource, datasinknode, stripstring=None):
             (("subject_id", lambda x: "".join([stripstring,x])), "strip_dir")]),
             ])
 
-def get_substitutions(workflow, outputnode, mergenode):
-    """Substitute the output field name for the filename for all outputs from a node
-    and send into a mergenode."""
-    outputs = outputnode.outputs.get()
-    for i, field in enumerate(outputs):
-        workflow.connect(outputnode, (field, substitute, field), mergenode, "in%d"%(i+1))
-    
 def substitute(origpath, subname):
     """Generate a list of substitution tuples."""
     if not isinstance(origpath, list):
@@ -41,6 +32,27 @@ def substitute(origpath, subname):
             ext = ".dat"
         substitutes.append((os.path.basename(path), subname + ext))
     return substitutes
+
+def get_output_substitutions(workflow, outputnode, mergenode):
+    """Substitute the output field name for the filename for all outputs from a node
+    and send into a mergenode."""
+    outputs = outputnode.outputs.get()
+    for i, field in enumerate(outputs):
+        workflow.connect(outputnode, (field, substitute, field), mergenode, "in%d"%(i+1))
+    
+def get_mapnode_substitions(nruns, nodes):
+    
+    substitutions = []
+    for r in range(nruns):
+	for node in nodes:
+            substitutions.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
+    return substitutions
+
+def set_substitutions(workflow, sinknode, mergenode, substitutions):
+
+    workflow.connect(
+	mergenode, ("out", lambda x: substitutions + x), sinknode, "substitutions")
+
 
 def connect_inputs(workflow, datagrabber, inputnode):
     """Connect the outputs of a Datagrabber to an inputnode.

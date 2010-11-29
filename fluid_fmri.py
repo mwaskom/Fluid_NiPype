@@ -1,17 +1,10 @@
 import os
-import re
-import sys
-import imp
-import shutil
 import argparse
 import inspect
 from copy import deepcopy
-from datetime import datetime
 
 import nipype.pipeline.engine as pe
 import nipype.interfaces.io as nio
-import nipype.interfaces.fsl as fsl
-import nipype.interfaces.freesurfer as fs
 import nipype.interfaces.utility as util
 from nipype.interfaces.base import Bunch
 
@@ -43,13 +36,13 @@ args = parser.parse_args()
 default_paradigm = "iq"
 
 # Dynamically import the experiment file
-# Get the paradigm from the command line, or use the 
-# IQ paradigm by default (so this can be importable)
 if args.paradigm is None:
     args.paradigm = default_paradigm
+# Look for paradgim_experiment.py in an experiments package
 try:   
     exp = __import__("experiments.%s_experiment"%args.paradigm,
                      fromlist=["experiments"])
+# Or maybe just get it from the current directory
 except ImportError:
     exp = __import__("%s_experiment"%args.paradigm)
 
@@ -116,30 +109,26 @@ preprocreport = pe.Node(nio.DataSink(base_directory=report_dir),
 preprocsinksub = pe.Node(util.Merge(len(preproc_output.outputs.__dict__.keys())),
                          name="preprocsinksub")
 
-flutil.get_substitutions(preproc, preproc_output, preprocsinksub)
+flutil.get_output_substitions(preproc, preproc_output, preprocsinksub)
 
 preprocreportsub = pe.Node(util.Merge(len(preproc_report.outputs.__dict__.keys())),
                               name="preprocreportsub")
 
-flutil.get_substitutions(preproc, preproc_report, preprocreportsub)
+flutil.get_output_substitions(preproc, preproc_report, preprocreportsub)
 
 # Preproc node substitutions
 # NOTE: It would be nice if this were more intuitive, but I haven't
 # figured out a good way.  Have to hardcode the node names for now.
-preprocsinknodesubs = []
-# Shouldn't hurt anything if we just get the maximum number
-# of substitutions, although it's a bit messy.
-for r in range(exp.nruns):
-    for node in ["art", "dilatemask", "highpass", "masksmoothfunc", 
-                 "extractref", "meanfunc2", "realign"]:
-        preprocsinknodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
+preproc_mapnodes = ["art", "dilatemask", "highpass", "masksmoothfunc", 
+                    "extractref", "meanfunc2", "realign"]
+preprocsinknodesubs = flutil.get_mapnode_substitutions(exp.nruns, preproc_mapnodes)
 
-preprocreportnodesubs = []
-for r in range(exp.nruns):
-    for plot in ["displacement", "rotation", "translation"]:
-        preprocreportnodesubs.append(("_plot%s%d"%(plot, r), "run_%d"%(r+1)))
-    for img in ["example", "mean"]:
-        preprocreportnodesubs.append(("_%sslice%d"%(img, r), "run_%d"%(r+1)))
+preproc_report_mapnodes = []
+for plot in ["displacement", "rotation", "translation"]:
+    preproc_report_mapnodes.append("plot%s"%plot)
+for img in ["example", "mean"]:
+    preproc_report_mapnodes.append("%sslice"%img)
+preprocreportnodesubs = flutil.get_mapnode_substitutions(exp.nruns, preproc_report_mapnodes)
 
 # Preproc connections
 preproc.connect([
@@ -184,15 +173,17 @@ reg_report = registration.get_node("report")
 # Registration datasource node
 regsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
                                     outfields=["warpfield", "mean_func",
+                                               "functional_mask", "example_func",
                                                "vol_timeseries", "surf_timeseries"],
                                     base_directory = project_dir,
                                     sort_filelist=True),
                     name="regsource")
 
 regsource.inputs.template = "Analysis/NiPype/" + args.paradigm + "/%s/preproc/run_?/%s.nii.gz"
-regsource.inputs.field_template = dict(warpfield="Data/%s/registration/%s.nii.gz")
+regsource.inputs.field_template = dict(warpfield="Data/%s/normalization/%s.nii.gz")
 regsource.inputs.template_args = dict(mean_func=[["subject_id", "mean_func"]],
                                       example_func=[["subject_id", "example_func"]],
+                                      functional_mask=[["subject_id", "functional_mask"]],
                                       vol_timeseries=[["subject_id", "smoothed_timeseries"]],
                                       surf_timeseries=[["subject_id", "unsmoothed_timeseries"]],
                                       warpfield=[["subject_id","warpfield"]])
@@ -204,43 +195,33 @@ regsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
 regreport = pe.Node(nio.DataSink(base_directory=report_dir),
                     name="regreport")
 
+# Registration connections
+registration.connect([
+    (subjectsource, regsource, [("subject_id", "subject_id")]),
+    (subjectsource, reg_input, [("subject_id", "subject_id")]),
+    ])
+
 # Registration filename substitutions
 regsinksub = pe.Node(util.Merge(len(reg_output.outputs.__dict__.keys())),
                      name="regsinksub")
 
-flutil.get_substitutions(registration, reg_output, regsinksub)
+flutil.get_output_substitions(registration, reg_output, regsinksub)
 
 regreportsub = pe.Node(util.Merge(len(reg_report.outputs.__dict__.keys())),
                        name="regreportsub")
 
-flutil.get_substitutions(registration, reg_report, regreportsub)
+flutil.get_output_substitions(registration, reg_report, regreportsub)
 
 # Registration node substitutions
-# NOTE: It would be nice if this were more intuitive, but I haven't
-# figured out a good way.  Have to hardcode the node names for now.
-regsinknodesubs = []
-# Shouldn't hurt anything if we just get the maximum number
-# of substitutions, although it's a bit messy.
-for r in range(exp.nruns):
-    for node in ["func2anat","warptimeseries"]:
-        regsinknodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
+reg_mapnodes = ["func2anat","warptimeseries","warpexample","warpmask","meanwarp"]
+regsinknodesubs = flutil.get_mapnode_substitutions(exp.nruns, reg_mapnodes)
 
-regreportnodesubs = []
-for r in range(exp.nruns):
-    for node in ["exfuncwarppng", "func2anat", "func2anatpng"]:
-        regreportnodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
+flutil.set_substitutions(registration, regsink, regsinksub, regsinknodesubs)
 
-# Registration connections
-registration.connect([
-    (subjectsource, regsource,  
-        [("subject_id", "subject_id")]),
-    (subjectsource, reg_input,
-        [("subject_id", "subject_id")]),
-    (regsinksub,   regsink,
-        [(("out", lambda x: regsinknodesubs + x), "substitutions")]),
-    (regreportsub, regreport,
-        [(("out", lambda x: regreportnodesubs + x), "substitutions")]),
-    ])
+reg_report_mapnodes = ["exfuncwarppng", "func2anat", "func2anatpng"]
+regreportnodesubs = flutil.get_mapnode_substitutions(exp.nruns, reg_report_mapnodes)
+
+flutil.set_substitutions(registration, regsink, regsinksub, regsinknodesubs)
 
 # Connect the inputs
 flutil.connect_inputs(registration, regsource, reg_input)
@@ -330,7 +311,6 @@ timeseries_template = dict(volume = dict(
 timeseries_args = dict(volume= [["subject_id", "warped_timeseries"]])
 
 # Set up the model workflow for each space 
-
 model = fsl_model.clone("volume_model")
 
 # Get model input and output
@@ -366,14 +346,12 @@ modelreport = pe.Node(nio.DataSink(base_directory=report_dir),
 modelreportsub = pe.Node(util.Merge(len(model_report.outputs.__dict__.keys())),
                        name="modelreportsub")
 
-flutil.get_substitutions(model, model_report, modelreportsub)
+flutil.get_output_substitions(model, model_report, modelreportsub)
 
 # Model node substitutions
 # NOTE: It would be nice if this were more intuitive, but I haven't
 # figured out a good way.  Have to hardcode the node names for now.
 modelsinknodesubs = []
-# Shouldn't hurt anything if we just get the maximum number
-# of substitutions, although it's a bit messy.
 for r in range(exp.nruns):
     for node in ["modelestimate"]:
         modelsinknodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
