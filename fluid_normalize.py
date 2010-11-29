@@ -46,7 +46,7 @@ fnirtfield = "warpfield.nii.gz"
 qcpng = "final_reg.png"
 
 # Set up the output dir
-regdir = os.path.join(subjdir, "registration")
+regdir = os.path.join(subjdir, "normalization")
 try:
     os.mkdir(regdir)
 except:
