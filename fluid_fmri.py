@@ -1,3 +1,6 @@
+"""
+Main interface for GFluid fMRI Nipype code.
+"""
 import os
 import argparse
 import inspect
@@ -16,7 +19,7 @@ from workflows.fsl_model import fsl_model
 import fluid_utility as flutil
 
 # Parse command line arguments
-parser = argparse.ArgumentParser(description="Main interface for GFluid fMRI NiPype code.")
+parser = argparse.ArgumentParser(description="Main interface for GFluid fMRI Nipype code.")
 
 parser.add_argument("-paradigm", metavar="paradigm", 
                     help="experimental paradigm")
@@ -66,6 +69,7 @@ else:
 if hasattr(exp, "exclude_subjects"):
     subject_list = [s for s in subject_list if s not in exp.exclude_subjects]
 
+print "Subjects: ", " ".join(subject_list)
 
 # Define some paths
 project_dir = "/mindhive/gablab/fluid"
@@ -130,15 +134,13 @@ for img in ["example", "mean"]:
     preproc_report_mapnodes.append("%sslice"%img)
 preprocreportnodesubs = flutil.get_mapnode_substitutions(exp.nruns, preproc_report_mapnodes)
 
+
+flutil.set_substitutions(preproc, preprocsink, preprocsinksub, preprocsinknodesubs)
+
+flutil.set_substitutions(preproc, preprocreport, preprocreportsub, preprocreportnodesubs)
+
 # Preproc connections
-preproc.connect([
-    (subjectsource,    preprocsource, 
-        [("subject_id", "subject_id")]),
-    (preprocsinksub,   preprocsink,
-        [(("out", lambda x: preprocsinknodesubs + x), "substitutions")]),
-    (preprocreportsub, preprocreport,
-        [(("out", lambda x: preprocreportnodesubs + x), "substitutions")]),
-    ])
+preproc.connect(subjectsource, "subject_id", preprocsource, "subject_id")
 
 # Input connections
 flutil.connect_inputs(preproc, preprocsource, preproc_input)
@@ -351,16 +353,19 @@ flutil.get_output_substitions(model, model_report, modelreportsub)
 # Model node substitutions
 # NOTE: It would be nice if this were more intuitive, but I haven't
 # figured out a good way.  Have to hardcode the node names for now.
-modelsinknodesubs = []
-for r in range(exp.nruns):
-    for node in ["modelestimate"]:
-        modelsinknodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
-modelsink.inputs.substitutions = modelsinknodesubs
+reg_mapnodes = ["func2anat","warptimeseries","warpexample","warpmask","meanwarp"]
+regsinknodesubs = flutil.get_mapnode_substitutions(exp.nruns, reg_mapnodes)
+
+flutil.set_substitutions(registration, regsink, regsinksub, regsinknodesubs)
+
+model_mapnodes = ["modelestimate","modelgen","sliceresidual","slicestats"]
+modelsinknodesubs = flutil.get_mapnode_substitutions(exp.nruns, model_mapnodes)
+
+flutil.set_substitutions(model, modelsink, modelsinknodesubs)
 
 modelreportnodesubs = [("_contrast_","stats/")]
-for r in range(exp.nruns):
-    for node in ["modelgen", "sliceresidual", "slicestats"]:
-        modelreportnodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
+
+flutil.set_substitutions(model, modelreport, modelreportnodesubs)
 
 # Define a node to seed the contrasts iterables with the contrast name
 connames = pe.Node(util.IdentityInterface(fields=["contrast"]),
@@ -387,8 +392,6 @@ model.connect([
         [(("out", subjectinfo, experiment), "subject_info")]),
     (connames, selectcontrast,
         [(("contrast", get_contrast_idx), "index")]),
-    (modelreportsub, modelreport,
-        [(("out", lambda x: modelreportnodesubs + x), "substitutions")]),
     ])
 
 # Connect inputs
@@ -422,7 +425,9 @@ flutil.archive_crashdumps(model)
 if __name__ == "__main__":
     if args.run:
         if __file__ == "fluid_fmri.py":
-            report_script = "python /mindhive/gablab/fluid/NiPype_Code/reporting/build_report.py "
+            report_script = "python /mindhive/gablab/fluid/Nipype_Code/reporting/build_report.py "
+        else:
+            report_script = "python /dev/null "
         
         if "preproc" in args.workflows:
             preproc.run(inseries=args.inseries)

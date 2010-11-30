@@ -361,7 +361,7 @@ if args.pype:
     unpack.run(inseries=args.inseries)
 
     # Log archiving
-    logdir = "/mindhive/gablab/fluid/NiPype_Code/log_archive/%s"%datestamp
+    logdir = "/mindhive/gablab/fluid/Nipype_Code/log_archive/%s"%datestamp
     if not os.path.isdir(logdir):
         os.mkdir(logdir)
     timestamp = str(datetime.now())[11:16].replace(":","-")

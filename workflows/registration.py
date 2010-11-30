@@ -79,8 +79,7 @@ outputnode = pe.Node(util.IdentityInterface(fields=["warped_timeseries",
 report = pe.Node(util.IdentityInterface(fields=["func2anat", 
                                                 "func2anat_cost", 
                                                 "example_func_warp",
-                                                "functional_mask_warp"])
-                                                ]),
+                                                "functional_mask_warp"]),
                  name="report")
 
 registration.connect([
@@ -109,7 +108,7 @@ registration.connect([
     (meanwarp,     outputnode,     [("out_file", "warped_mean_func")]),
     (func2anat,    report,         [("min_cost_file", "func2anat_cost")]),
     (func2anatpng, report,         [("out_file", "func2anat")]),
-    (warpmaskpng,  report,         [("out_file", "functionak_mask_warp"]),
+    (warpmaskpng,  report,         [("out_file", "functional_mask_warp")]),
     (exwarppng,    report,         [("out_file", "example_func_warp")])
     ])
 

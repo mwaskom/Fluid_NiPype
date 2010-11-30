@@ -40,7 +40,7 @@ def get_output_substitutions(workflow, outputnode, mergenode):
     for i, field in enumerate(outputs):
         workflow.connect(outputnode, (field, substitute, field), mergenode, "in%d"%(i+1))
     
-def get_mapnode_substitions(nruns, nodes):
+def get_mapnode_substitutions(nruns, nodes):
     
     substitutions = []
     for r in range(nruns):
@@ -51,7 +51,7 @@ def get_mapnode_substitions(nruns, nodes):
 def set_substitutions(workflow, sinknode, mergenode, substitutions):
 
     workflow.connect(
-	mergenode, ("out", lambda x: substitutions + x), sinknode, "substitutions")
+	mergenode, ("out", lambda x: x + substitutions), sinknode, "substitutions")
 
 
 def connect_inputs(workflow, datagrabber, inputnode):
@@ -77,7 +77,7 @@ def sink_outputs(workflow, outputnode, datasinknode, pathstr):
         workflow.connect(outputnode, field, datasinknode, pathstr + field)
 
 def archive_crashdumps(workflow):
-    """Archive crashdumps by date to NiPype_Code directory"""
+    """Archive crashdumps by date to Nipype_Code directory"""
     datestamp = str(datetime.now())[:10]
     codepath = os.path.split(os.path.abspath(__file__))[0]
     crashdir = os.path.abspath("%s/crashdumps/%s" % (codepath, datestamp))
