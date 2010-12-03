@@ -498,7 +498,7 @@ for subj in subjects:
                 # Check for this process by looking for the log file
                 if not os.path.exists(os.path.join(trgdir, "dt_recon.log")):
                     # DT_recon command line
-                    sgescript.append("dt_recon --i %s --s %s --o %s"%(srcfile, subj, trgdir))
+                    sgescript.append("dt_recon --i %s --s %s --o %s --no-tal"%(srcfile, subj, trgdir))
                     print "Adding %s dt_recon job to SGE script"%subj
                 else:
                     print "dt_recon log found for %s; skipping dwi unpacking"%subj
@@ -510,7 +510,7 @@ for subj in subjects:
     if args.reg and os.path.exists(os.path.join(datadir, subj, "mri/orig/001.mgz")):
         # Fluid_register command line
         sgescript.append(
-            "python /mindhive/gablab/fluid/NiPype_Code/fluid_normalize.py %s"%subj)
+            "python /mindhive/gablab/fluid/Nipype_Code/fluid_normalize.py %s"%subj)
         print "Adding %s normalization to SGE script"%subj
         
     # Actually submit to Sun Grid Engine

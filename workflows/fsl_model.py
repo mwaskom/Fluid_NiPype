@@ -1,8 +1,5 @@
 import nipype.algorithms.modelgen as modelgen
-import nipype.algorithms.rapidart as art
 import nipype.interfaces.fsl as fsl
-import nipype.interfaces.spm as spm
-import nipype.interfaces.freesurfer as fs
 import nipype.interfaces.utility as util
 import nipype.pipeline.engine as pe
 
