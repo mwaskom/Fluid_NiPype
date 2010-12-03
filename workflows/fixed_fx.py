@@ -1,85 +1,67 @@
-import os
-import nipype.interfaces.io as nio
-import nipype.interfaces.freesurfer as fs
 import nipype.interfaces.fsl as fsl
-import nipype.algorithms.modelgen as model
 import nipype.interfaces.utility as util
 import nipype.pipeline.engine as pe
 
-"""
-Set up fixed-effects workflow
------------------------------
-"""
 
-"""
-Define all of the nodes
-"""
+# Inputs
+inputnode = pe.Node(util.IdentityInterface(fields=["cope", "varcope"]),
+                    name="inputspec")
 
-"""
-Use :class:`nipype.interfaces.fsl.Merge` to merge the copes and
-varcopes for each condition
-"""
+# Concatenate the Cope for each run
+copemerge = pe.Node(fsl.Merge(dimension="t"),
+                    name="copemerge")
 
-copemerge = pe.MapNode(interface=fsl.Merge(dimension='t'),
-                       iterfield=["in_files"],
-                       name="copemerge")
+# Concatenate the Varcope for each run
+varcopemerge = pe.Node(fsl.Merge(dimension="t"),
+                       name="varcopemerge")
 
-varcopemerge = pe.MapNode(interface=fsl.Merge(dimension='t'),
-                          iterfield=["in_files"],
-                          name="varcopemerge")
+# Set up a FLAMEO model
+level2model = pe.Node(fsl.L2Model(),
+                      name="l2model")
 
-"""
-Use :class:`nipype.interfaces.fsl.L2Model` to generate subject and condition
-specific level 2 model design files
-"""
+# Will probably want to change this so we can run in native space
+brain_mask = fsl.Info.standard_image("MNI152_T1_2mm_brain_mask_dil.nii.gz")
 
-level2model = pe.Node(interface=fsl.L2Model(),
-                      name='l2model')
-
-"""
-Use :class:`nipype.interfaces.fsl.FLAMEO` to estimate a second level model
-"""
-
-brain_mask = fsl.Info.standard_image("avg152T1_brain.nii.gz")
-
-flamemask = pe.Node(fs.Binarize(min=10,in_file=brain_mask),
-                    name="flamemask")
-
-flameo = pe.MapNode(interface=fsl.FLAMEO(run_mode='fe'),
-                 iterfield=["cope_file","var_cope_file"],
+# Run a fixed effects analysis in FLAMEO
+flameo = pe.Node(fsl.FLAMEO(run_mode="fe", mask_file=brain_mask),
                  name="flameo")
 
+
+# Again, will probably want to change this
 mni_brain = fsl.Info.standard_image("avg152T1.nii.gz")
-overlayflame = pe.MapNode(interface=fsl.Overlay(stat_thresh=(2.5, 10),
+
+# Overlay the stats onto a background image
+overlayflame = pe.Node(fsl.Overlay(stat_thresh=(2.3, 10),
                                                 auto_thresh_bg=True,
                                                 show_negative_stats=True,
                                                 background_image=mni_brain),
-                          iterfield=["stat_image"],
-                          name='overlayflame')
+                          name="overlayflame")
 
-sliceflame = pe.MapNode(interface=fsl.Slicer(all_axial=True,
-                                             image_width=750),
-                        iterfield=["in_file"],
-                        name='sliceflame')
+# Slice the overlaid statistical images
+sliceflame = pe.Node(fsl.Slicer(image_width=872),
+                        name="sliceflame")
+sliceflame.inputs.sample_axial = 2
 
-"""
-Connect the nodes in the volume workflow
-"""
+# Outputs
+outputnode = pe.Node(util.IdentityInterface(fields=["stats"]), name="outputspec")
 
-vol_fixed_fx = pe.Workflow(name='vol_fixed_fx')
+# Report
+report = pe.Node(util.IdentityInterface(fields=["zstat"]), name="report")
 
-vol_fixed_fx.connect([(copemerge,flameo,[('merged_file','cope_file')]),
-                      (varcopemerge,flameo,[('merged_file','var_cope_file')]),
-                      (level2model,flameo, [('design_mat','design_file'),
-                                            ('design_con','t_con_file'),
-                                            ('design_grp','cov_split_file')]),
-                      (flamemask,flameo, [("binary_file", "mask_file")]),
-                      (flameo,overlayflame,[('zstats','stat_image')]),
-                      (overlayflame,sliceflame,[('out_file', 'in_file')])
-                  ])
+fixed_fx = pe.Workflow(name="fixed_fx")
 
-"""
-Clone the volume workflow for the surface flow
-"""
+fixed_fx.connect([
+    (inputnode,    copemerge,     [("cope", "in_files")]),
+    (inputnode,    varcopemerge,  [("varcope", "in_files")]),
+    (copemerge,    flameo,        [("merged_file","cope_file")]),
+    (varcopemerge, flameo,        [("merged_file","var_cope_file")]),
+    (inputnode,    level2model,   [(("cope", lambda x: len(x)), "num_copes")]),
+    (level2model,  flameo,        [("design_mat","design_file"),
+                                   ("design_con","t_con_file"),
+                                   ("design_grp","cov_split_file")]),
+    (flameo,       overlayflame,  [("zstats","stat_image")]),
+    (overlayflame, sliceflame,    [("out_file", "in_file")]),
+    (flameo,       outputnode,    [("stats_dir", "stats")]),
+    (sliceflame,   report,        [("out_file", "zstat")]),
+    ])
 
-surf_fixed_fx = vol_fixed_fx.clone("surf_fixed_fx")

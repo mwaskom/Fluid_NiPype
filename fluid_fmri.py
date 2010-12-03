@@ -14,7 +14,7 @@ from nipype.interfaces.base import Bunch
 from workflows.preproc import preproc
 from workflows.registration import registration
 from workflows.fsl_model import fsl_model
-#from workflows.fluid_fixed_fx import fixed_fx
+from workflows.fixed_fx import fixed_fx
 
 import fluid_utility as flutil
 
@@ -52,7 +52,7 @@ except ImportError:
 if args.workflows is None:
     args.workflows = []
 elif args.workflows == ["all"]:
-    args.workflows = ["preproc", "reg", "model"]
+    args.workflows = ["preproc", "reg", "model", "ffx"]
 
 # Determine the subjects list
 # Hierarchy:
@@ -113,12 +113,12 @@ preprocreport = pe.Node(nio.DataSink(base_directory=report_dir),
 preprocsinksub = pe.Node(util.Merge(len(preproc_output.outputs.__dict__.keys())),
                          name="preprocsinksub")
 
-flutil.get_output_substitions(preproc, preproc_output, preprocsinksub)
+flutil.get_output_substitutions(preproc, preproc_output, preprocsinksub)
 
 preprocreportsub = pe.Node(util.Merge(len(preproc_report.outputs.__dict__.keys())),
                               name="preprocreportsub")
 
-flutil.get_output_substitions(preproc, preproc_report, preprocreportsub)
+flutil.get_output_substitutions(preproc, preproc_report, preprocreportsub)
 
 # Preproc node substitutions
 # NOTE: It would be nice if this were more intuitive, but I haven't
@@ -207,12 +207,12 @@ registration.connect([
 regsinksub = pe.Node(util.Merge(len(reg_output.outputs.__dict__.keys())),
                      name="regsinksub")
 
-flutil.get_output_substitions(registration, reg_output, regsinksub)
+flutil.get_output_substitutions(registration, reg_output, regsinksub)
 
 regreportsub = pe.Node(util.Merge(len(reg_report.outputs.__dict__.keys())),
                        name="regreportsub")
 
-flutil.get_output_substitions(registration, reg_report, regreportsub)
+flutil.get_output_substitutions(registration, reg_report, regreportsub)
 
 # Registration node substitutions
 reg_mapnodes = ["func2anat","warptimeseries","warpexample","warpmask","meanwarp"]
@@ -223,7 +223,7 @@ flutil.set_substitutions(registration, regsink, regsinksub, regsinknodesubs)
 reg_report_mapnodes = ["exfuncwarppng", "func2anat", "func2anatpng"]
 regreportnodesubs = flutil.get_mapnode_substitutions(exp.nruns, reg_report_mapnodes)
 
-flutil.set_substitutions(registration, regsink, regsinksub, regsinknodesubs)
+flutil.set_substitutions(registration, regreport, regreportsub, regreportnodesubs)
 
 # Connect the inputs
 flutil.connect_inputs(registration, regsource, reg_input)
@@ -247,15 +247,15 @@ flutil.archive_crashdumps(registration)
 
 # Moderate hack to strip deepcopy-offensive stuff from an experiment module
 # Fixes bug in Python(!)
-class Foo(object): pass
-experiment = Foo()
+class Experiment(object): pass
+experiment = Experiment()
 for k,v in exp.__dict__.items():
     if not k.startswith("__") and not inspect.ismodule(v):
         setattr(experiment, k, v)
 
 # Model relevant functions
 def count_runs(runs):
-    """Count the number of functional timeseries globbed for each subject."""
+    """Count the number of functional timeseries being analyzed for each subject."""
     if not isinstance(runs, list):
         runs = [runs]
     return len(runs)
@@ -276,6 +276,10 @@ def subjectinfo(info, exp):
 
     """
     subject_id = info[0]
+    if subject_id.endswith("p"):
+        day = 2
+    else:
+        day = 1
     nruns = info[1]
     output = []
     events = exp.events
@@ -348,24 +352,26 @@ modelreport = pe.Node(nio.DataSink(base_directory=report_dir),
 modelreportsub = pe.Node(util.Merge(len(model_report.outputs.__dict__.keys())),
                        name="modelreportsub")
 
-flutil.get_output_substitions(model, model_report, modelreportsub)
+flutil.get_output_substitutions(model, model_report, modelreportsub)
 
 # Model node substitutions
 # NOTE: It would be nice if this were more intuitive, but I haven't
 # figured out a good way.  Have to hardcode the node names for now.
-reg_mapnodes = ["func2anat","warptimeseries","warpexample","warpmask","meanwarp"]
-regsinknodesubs = flutil.get_mapnode_substitutions(exp.nruns, reg_mapnodes)
+modelsinknodesubs = []
+for r in range(exp.nruns):
+    for node in ["modelestimate"]:
+        modelsinknodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
+modelsink.inputs.substitutions = modelsinknodesubs
 
-flutil.set_substitutions(registration, regsink, regsinksub, regsinknodesubs)
 
-model_mapnodes = ["modelestimate","modelgen","sliceresidual","slicestats"]
-modelsinknodesubs = flutil.get_mapnode_substitutions(exp.nruns, model_mapnodes)
+modelreport_mapnodes = ["slicestats", "modelgen", "sliceresidual"]
 
-flutil.set_substitutions(model, modelsink, modelsinknodesubs)
+modelreportnodesubs = flutil.get_mapnode_substitutions(exp.nruns, modelreport_mapnodes)
 
-modelreportnodesubs = [("_contrast_","stats/")]
+modelreportnodesubs.append(("_contrast_","stats/"))
 
-flutil.set_substitutions(model, modelreport, modelreportnodesubs)
+
+flutil.set_substitutions(model, modelreport, modelreportsub, modelreportnodesubs)
 
 # Define a node to seed the contrasts iterables with the contrast name
 connames = pe.Node(util.IdentityInterface(fields=["contrast"]),
@@ -418,9 +424,74 @@ model.base_dir = working_dir
 # Set crashdumps
 flutil.archive_crashdumps(model)
 
-# Across-run Fixed Fx
+# Across-run Fixed Effects
+# ------------------------
 
+# Get fixed_fx input and output
+ffx_input = fixed_fx.get_node("inputspec")
+ffx_output = fixed_fx.get_node("outputspec")
+ffx_report = fixed_fx.get_node("report")
 
+# Fixed effects datasource node
+ffxsource = pe.Node(nio.DataGrabber(infields=["subject_id","contrast"],
+                                    outfields=["cope","varcope"],
+                                    base_directory = project_dir,
+                                    sort_filelist=True),
+                    name="ffxsource")
+
+ffxsource.inputs.template = "Analysis/NiPype/" + args.paradigm + "/%s/model/volume/run_?/%s%d.nii.gz"
+ffxsource.inputs.template_args = dict(cope = [["subject_id", "cope", "contrast"]],
+                                      varcope = [["subject_id", "varcope", "contrast"]])
+
+# Fixed effects Datasink nodes
+ffxsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
+                  name="ffxsink")
+
+ffxreport = pe.Node(nio.DataSink(base_directory=report_dir),
+                    name="ffxreport")
+
+# Fixed effects connections
+fixed_fx.connect(subjectsource, "subject_id", ffxsource, "subject_id")
+
+# Connect contrast names to datasource, which wants a 1-based index
+def get_con_img_idx(contrast_name):
+    """Return the index corresponding to the name of a contrast."""
+    return [i+1 for i, data in enumerate(exp.contrasts) if data[0] == contrast_name][0]
+
+fixed_fx.connect(connames, ("contrast", get_con_img_idx), ffxsource, "contrast")
+
+# Fixed effects filename substitutions
+ffxsinksub = pe.Node(util.Merge(len(ffx_output.outputs.__dict__.keys())),
+                     name="ffxsinksub")
+
+flutil.get_output_substitutions(fixed_fx, ffx_output, ffxsinksub)
+
+ffxreportsub = pe.Node(util.Merge(len(ffx_report.outputs.__dict__.keys())),
+                       name="ffxreportsub")
+
+flutil.get_output_substitutions(fixed_fx, ffx_report, ffxreportsub)
+
+# Fixed effects node substitutions
+flutil.set_substitutions(fixed_fx, ffxsink, ffxsinksub, [("_contrast_", "")])
+
+flutil.set_substitutions(fixed_fx, ffxreport, ffxreportsub, [("_contrast_", "")])
+
+# Connect the inputs
+flutil.connect_inputs(fixed_fx, ffxsource, ffx_input)
+
+# Set up the subject containers
+flutil.subject_container(fixed_fx, subjectsource, ffxsink)
+flutil.subject_container(fixed_fx, subjectsource, ffxreport)
+
+# Connect the heuristic outputs to the datainks
+flutil.sink_outputs(fixed_fx, ffx_output, ffxsink, "fixed_fx")
+flutil.sink_outputs(fixed_fx, ffx_report, ffxreport, "fixed_fx")
+
+# Fixed effects working output
+fixed_fx.base_dir = working_dir
+
+# Set crashdumps
+flutil.archive_crashdumps(fixed_fx)
 
 if __name__ == "__main__":
     if args.run:
@@ -439,4 +510,8 @@ if __name__ == "__main__":
         
         if "model" in args.workflows:
             model.run(inseries=args.inseries)
+            os.system(report_script + " ".join(subject_list))
+        
+        if "ffx" in args.workflows:
+            fixed_fx.run(inseries=args.inseries)
             os.system(report_script + " ".join(subject_list))
