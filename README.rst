@@ -5,62 +5,78 @@ Functional Analysis
 -------------------
 
 ``fluid_fmri.py`` -- 
-Main interface for functional analysis
+Main interface for functional analysis. 
+Uses code from workflows and experiment packages.
 
-``fluid_source.py`` -- 
-Source utility nodes
+``fluid_resting.py`` -- 
+Interface for resting state preprocessing and registration. 
+Uses code from workflows package.
+
+
+Workflows
+---------
+Package with workflow modules.
+*Should* be entirely independent of anything Gfluid relevant.
 
 ``preproc.py`` -- 
-Preprocessing
+Preprocessing.
 
 ``fsl_model.py`` -- 
-First-level FSL modelfitting 
+First-level FSL modelfitting .
 
 ``spm_model.py`` -- 
-First-level SPM modelfitting
+First-level SPM modelfitting.
 
 ``fixed_fx.py`` -- 
-Second-level (within-subject) fixed-effect analysis
+Second-level (within-subject) fixed-effect analysis.
 
-Experiment Modules
-------------------
+``resting_preproc.py`` -- 
+Preprocessing for resting-state scans.
+
+``vbm_preproc.py``
+Preprocssing for arbitrary VBM style analysis.
+
+Experiment
+----------
+Package with modules containing paradigm information.
 
 ``iq_experiment.py`` -- 
-fMRI paradigm with psychometric tasks
+fMRI paradigm with psychometric tasks.
 
 ``nback_experiment.py`` -- 
-Dual (auditory letter-matching/spatial) N-Back task
+Dual (auditory letter-matching/spatial) N-Back task.
 
 ``mot_block_experiment.py`` -- 
-Blocked multiple object tracking
+Blocked multiple object tracking.
 
 ``mot_jitter_experiment.py`` -- 
-Event-related multiple object tracking 
-
-``rt_exeriment.py`` -- 
-Simple and choice reaction time tasks
+Event-related multiple object tracking.
 
 Structural Analysis
 -------------------
 
 ``fluid_flash.py`` -- 
-Analysis of multispectral FLASH images
+Analysis of multispectral FLASH images.
+
+``fluid_dti.py`` -- 
+Analysis of DTI-based images.
 
 Misc
 ----
 
 ``unpack_dicoms.py`` -- 
 NiPype script to convert DICOM files to nifti/mgh format and perform 
-structural preprocessing
+structural preprocessing.
 
 ``generate_parfiles.py`` -- 
-Script to read Psychtoolbox experiment files and create FSL parfiles
+Script to read Psychtoolbox experiment files and create FSL parfiles.
 
-``fluid_utility_funcs.py`` -- 
-Assorted functions used in our NiPype scripts
+``fluid_utility.py`` -- 
+Assorted functions used in our NiPype scripts.
 
 Note
 ----
 
 The code contained in this repository is subject to change at any time.
-
+(Although I would like to think that the processing and registration workflows 
+are pretty stable).
