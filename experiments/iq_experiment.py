@@ -17,8 +17,8 @@ fsl_bases = {"dgamma":{"derivs":False}}
 spm_bases = {"hrf":[0,0]}
 
 parfile_base_dir = "/mindhive/gablab/fluid/Data"
-parfile_template = "%s/parfiles/IQ_r%d_d1_%s_%s.txt"
-parfile_args = ["subject_id", "run_number", "event", "subject_id"]
+parfile_template = "%s/parfiles/IQ_r%d_d%d_%s_%s.txt"
+parfile_args = ["subject_id", "run_number", "day", "event", "subject_id"]
 
 events = ["easy", "hard"]
 
