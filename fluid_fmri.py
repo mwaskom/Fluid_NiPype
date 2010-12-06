@@ -477,7 +477,7 @@ flutil.set_substitutions(fixed_fx, ffxsink, ffxsinksub, [("_contrast_", "")])
 flutil.set_substitutions(fixed_fx, ffxreport, ffxreportsub, [("_contrast_", "")])
 
 # Connect the inputs
-flutil.connect_inputs(fixed_fx, ffxsource, ffx_input)
+flutil.connect_inputs(fixed_fx, ffxsource, ffx_input, makelist = ["cope", "varcope"])
 
 # Set up the subject containers
 flutil.subject_container(fixed_fx, subjectsource, ffxsink)

@@ -54,16 +54,27 @@ def set_substitutions(workflow, sinknode, mergenode, substitutions):
 	mergenode, ("out", lambda x: x + substitutions), sinknode, "substitutions")
 
 
-def connect_inputs(workflow, datagrabber, inputnode):
+def connect_inputs(workflow, datagrabber, inputnode, makelist=[]):
     """Connect the outputs of a Datagrabber to an inputnode.
 
     The names of the datagrabber outfields and the inputnode fields must match.
+
+    The makelist parameter can be used to wrap certain inputs in a list.
     """
     inputs = inputnode.inputs.get()
     outputs = datagrabber.outputs.get()
     fields = [f for f in inputs if f in outputs]
     for field in fields:
-        workflow.connect(datagrabber, field, inputnode, field)
+        if field in makelist:
+            workflow.connect(datagrabber, (field, make_list), inputnode, field)
+        else:
+            workflow.connect(datagrabber, field, inputnode, field)
+
+def make_list(inputs):
+    
+    if not isinstance(inputs, list):
+        inputs = [inputs]
+    return inputs
 
 def sink_outputs(workflow, outputnode, datasinknode, pathstr):
     
