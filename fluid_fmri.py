@@ -43,11 +43,11 @@ if args.paradigm is None:
     args.paradigm = default_paradigm
 # Look for paradgim_experiment.py in an experiments package
 try:   
-    exp = __import__("experiments.%s_experiment"%args.paradigm,
+    exp = __import__("experiments." + args.paradigm,
                      fromlist=["experiments"])
 # Or maybe just get it from the current directory
 except ImportError:
-    exp = __import__("%s_experiment"%args.paradigm)
+    exp = __import__(args.paradigm)
 
 if args.workflows is None:
     args.workflows = []
