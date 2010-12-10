@@ -1,12 +1,10 @@
 """
-NiPype module for the analysis of multispectral FLASH images
+Nipype module for the analysis of multispectral FLASH images
 """
 
 import os
-import sys
 import argparse
 from glob import glob
-from datetime import datetime
 import numpy as np
 
 import nipype.pipeline.engine as pe
@@ -16,11 +14,28 @@ import nipype.interfaces.fsl as fsl
 import nipype.interfaces.utility as util
 import nipype.interfaces.freesurfer as fs
 
+import fluid_utility as flutil
+
 # Parse the command line
 # ----------------------
 parser = argparse.ArgumentParser(description="FLASH processing stream for GFluid project.")
+parser.add_argument("-subjects", nargs="*",
+                    metavar="subject_id",
+                    help="process subject(s)")
+parser.add_argument("-workflows", nargs="*",
+                    metavar="WF",
+                    help="which workflows to run (cvt, reg, fit)")
+parser.add_argument("-inseries",action="store_true",
+                    help="force running in series")
+args = parser.parse_args()
 
-subject_list = ["gf21","gf23","gf26","gf27","gf29","gf30","gf32"]
+if args.workflows == ["all"]:
+    args.workflows = ["cvt", "reg", "fit"]
+
+if args.subjects is None:
+    subject_list = ["gf21","gf23","gf26","gf27","gf29","gf30","gf32"]
+else:
+    subject_list = args.subjects
 
 # Hard code some paths
 # --------------------
@@ -100,28 +115,25 @@ dcmgrabber.inputs.base_directory="/mindhive/gablab/fluid/Data"
 dcmgrabber.inputs.template="%s/dicom/%s/%s"
 dcmgrabber.inputs.template_args=dict(dicom=[["sid","type","dcm"]])
 
-convert_pipe.connect(sidsource, "sid", dcmgrabber, "sid")
-convert_pipe.connect(
-    sidsource, ("sid", lambda x: [t[1] for t in find_flash(x)]), dcmgrabber, "dcm")
-convert_pipe.connect(
-    sidsource, ("sid", lambda x: [t[4] for t in find_flash(x)]), dcmgrabber, "type")
 
 # Convert each FLASH echo to mgz format
 convertdcm = pe.MapNode(fs.MRIConvert(out_type="mgz"),
                         name="convertdcm",iterfield=["args","in_file"])
 
-convert_pipe.connect(dcmgrabber, "dicom", convertdcm, "in_file")
-convert_pipe.connect(
-    sidsource, ("sid", lambda x: ["-nth %d"%t[3] for t in find_flash(x)]), convertdcm, "args")
-
 # Save the converted FLASH images in the data directory
 sinkflash = pe.Node(nio.DataSink(base_directory=data_dir),name="sinkflash")
 
-convert_pipe.connect([(sidsource, sinkflash, [("sid", "container"),
-                                             (("sid", lambda x: "_sid_"+x), "strip_dir"),
-                                             (("sid", get_dcm_substitutes), "substitutions")]),
-                     (convertdcm, sinkflash, [("out_file", "flash.@mgz_files")])
-                     ])                              
+convert_pipe.connect([
+    (sidsource,   dcmgrabber,  [("sid", "sid"),
+                                (("sid", lambda x: [t[1] for t in find_flash(x)]), "dcm"),
+                                (("sid", lambda x: [t[4] for t in find_flash(x)]), "type")]),
+    (dcmgrabber,  convertdcm,  [("dicom", "in_file")]),
+    (sidsource,   convertdcm,  [(("sid", lambda x:["-nth %d"%t[3] for t in find_flash(x)]), "args")]),
+    (sidsource,   sinkflash,   [("sid", "container"),
+                                (("sid", lambda x: "_sid_"+x), "strip_dir"),
+                                (("sid", get_dcm_substitutes), "substitutions")]),
+    (convertdcm,  sinkflash,   [("out_file", "flash.@mgz_files")]),
+    ])                              
 
 # Registration Pipeline
 # ---------------------
@@ -140,9 +152,6 @@ flashgrabber.inputs.base_directory = os.path.join(data_dir)
 flashgrabber.inputs.template = "%s/flash/flash_%02d-?.mgz"
 flashgrabber.inputs.template_args = dict(flash_files=[["sid", "alpha"]])
 
-reg_pipe.connect([(sidsource, flashgrabber, [("sid", "sid")]),
-                  (anglesource, flashgrabber, [("alpha", "alpha")])
-                  ])
 
 # Collect the RMS Flash images that were converted earlier
 rmsgrabber = pe.Node(nio.DataGrabber(infields=["alpha","sid"],outfields=["flash_rms"]),
@@ -152,19 +161,11 @@ rmsgrabber.inputs.base_directory = os.path.join(data_dir)
 rmsgrabber.inputs.template = "%s/flash/flash_%02d-rms.mgz"
 rmsgrabber.inputs.template_args = dict(flash_files=[["sid", "alpha"]])
 
-reg_pipe.connect([(sidsource, rmsgrabber, [("sid", "sid")]),
-                  (anglesource, rmsgrabber, [("alpha", "alpha")])
-                  ])
-
 # Convert the RMS image to nifti so BET can read it
-cvt2nii = pe.Node(fs.MRIConvert(out_type=="niigz"), name="cvt2nii")
-
-reg_pipe.connect(rmsgrabber, "flash_rms", cvt2nii, "in_file")
+cvt2nii = pe.Node(fs.MRIConvert(out_type="niigz"), name="cvt2nii")
 
 # Skullstrip the RMS images
 stripflash = pe.Node(fsl.BET(), name="stripflash")
-
-reg_pipe.connect(cvt2nii, "out_file", stripflash, "in_file")
 
 # Register each RMS image to the Freesurfer structural
 coregister = pe.Node(fs.BBRegister(init="fsl"),
@@ -173,29 +174,33 @@ coregister = pe.Node(fs.BBRegister(init="fsl"),
 # Create a dictionary to associate expected image contrast with flip angle
 angle2contrast = {5:"t2",20:"t1",30:"t1"}
 
-reg_pipe.connect([
-    (sidsource, coregister, [("sid", "subject_id")]),
-    (anglesource, coregister, [(("alpha", lambda x: angle2contrast[x]), "contrast_type")]),
-    (stripflash, coregister, [("out_file", "source_file")])
-                  ])
-
 # Apply the transformation to each echo image
 applyxfm = pe.MapNode(fs.ApplyVolTransform(fs_target=True),
                       iterfield=["source_file"],
                       name="applyxfm")
 
-reg_pipe.connect([(coregister, applyxfm, [("out_reg_file", "reg_file")]),
-                  (flashgrabber, applyxfm, [("flash_files", "source_file")])
-                  ])
-
 # Sink the transformed images
 xfmsink = pe.Node(nio.DataSink(base_directory=analysis_dir),name="xfmsink")
 xfmsink.inputs.parameterization = False
 xfmsink.inputs.substitutions = [("_warped","")]
-reg_pipe.connect([(sidsource, xfmsink, [("sid", "container"),
-                                        (("sid", lambda x: "_sid_" + x), "strip_dir")]),
-                  (applyxfm, xfmsink, [("transformed_file", "coregistration.@flash_files")])
-                  ])
+
+
+reg_pipe.connect([
+    (sidsource,    flashgrabber, [("sid", "sid")]),
+    (anglesource,  flashgrabber, [("alpha", "alpha")]),
+    (sidsource,    rmsgrabber,   [("sid", "sid")]),
+    (anglesource,  rmsgrabber,   [("alpha", "alpha")]),
+    (rmsgrabber,   cvt2nii,      [("flash_rms", "in_file")]),
+    (cvt2nii,      stripflash,   [("out_file", "in_file")]),
+    (sidsource,    coregister,   [("sid", "subject_id")]),
+    (anglesource,  coregister,   [(("alpha", lambda x: angle2contrast[x]), "contrast_type")]),
+    (stripflash,   coregister,   [("out_file", "source_file")]),
+    (coregister,   applyxfm,     [("out_reg_file", "reg_file")]),
+    (flashgrabber, applyxfm,     [("flash_files", "source_file")]),
+    (sidsource,    xfmsink,      [("sid", "container"),
+                                  (("sid", lambda x: "_sid_" + x), "strip_dir")]),
+    (applyxfm,     xfmsink,      [("transformed_file", "coregistration.@flash_files")]),
+    ])
 
 
 # Parameter Estimation Pipeline
@@ -210,12 +215,8 @@ regflashgrabber.inputs.base_directory = analysis_dir
 regflashgrabber.inputs.template = "%s/coregistration/flash_??-?.mgz"
 regflashgrabber.inputs.template_args = dict(flash_files=[["sid"]])
 
-fit_pipe.connect(sidsource, "sid", regflashgrabber, "sid")
-
 # Estimate tissue parameters
 fitparams = pe.Node(fs.FitMSParams(), name="fitparams")
-
-fit_pipe.connect(regflashgrabber, "flash_files", fitparams, "in_files")
 
 hemisource = pe.Node(util.IdentityInterface(fields=["hemi"]),name="hemisource")
 hemisource.iterables = ("hemi", ["lh","rh"])
@@ -228,11 +229,6 @@ t1surf = pe.Node(fs.SampleToSurface(reg_header=True,
                                     cortex_mask=True),
                  name="t1surf")
 
-fit_pipe.connect([(sidsource, t1surf, [("sid", "subject_id")]),
-                  (hemisource, t1surf, [("hemi", "hemi")]),
-                  (fitparams, t1surf, [("t1_image", "source_file")]),
-                  ])
-
 #Take screenshots of the T1 parameters on the surface
 surfshots = pe.Node(fs.SurfaceScreenshots(surface="inflated",
                                           show_color_scale=True,
@@ -241,30 +237,30 @@ surfshots = pe.Node(fs.SurfaceScreenshots(surface="inflated",
                                           overlay_range=(950,2500)),
                     name="surfshots")
 
-fit_pipe.connect([(sidsource, surfshots, [("sid", "subject")]),
-                  (hemisource, surfshots, [("hemi", "hemi")]),
-                  (t1surf, surfshots, [("out_file", "overlay")]),
-                  ])
-
 # Sink the T1 volumes and surfaces into the analysis directory
 paramsink = pe.Node(nio.DataSink(base_directory=analysis_dir),name="paramsink")
 paramsink.inputs.parameterization = False
-fit_pipe.connect([(sidsource, paramsink, [("sid", "container"),
-                                          (("sid", lambda x: "_sid_"+x), "strip_dir")]),
-                  (fitparams, paramsink, [("t1_image", "tissue_parameters.@T1_vol")]),
-                  (t1surf, paramsink, [("out_file", "tissue_parameters.@T1_surf")]),
-                  (surfshots, paramsink, [("screenshots", "screenshots.@images")]),
-                  ])
+fit_pipe.connect([
+    (sidsource,        regflashgrabber, [("sid", "sid")]), 
+    (regflashgrabber,  fitparams,       [("flash_files", "in_files")]),
+    (fitparams,        t1surf,          [("t1_image", "source_file")]),
+    (sidsource,        t1surf,          [("sid", "subject_id")]),
+    (hemisource,       t1surf,          [("hemi", "hemi")]),
+    (sidsource,        surfshots,       [("sid", "subject")]),
+    (hemisource,       surfshots,       [("hemi", "hemi")]),
+    (t1surf,           surfshots,       [("out_file", "overlay")]),
+    (sidsource,        paramsink,       [("sid", "container"),
+                                         (("sid", lambda x: "_sid_"+x), "strip_dir")]),
+    (fitparams,        paramsink,       [("t1_image", "tissue_parameters.@T1_vol")]),
+    (t1surf,           paramsink,       [("out_file", "tissue_parameters.@T1_surf")]),
+    (surfshots,        paramsink,       [("screenshots", "screenshots.@images")]),
+    ])
+
+
 
 # Set the crashdump directory                           
-datestamp = str(datetime.now())[:10]
-codepath = os.path.split(os.path.abspath(__file__))[0]
-crashdir = os.path.abspath("%s/crashdumps/%s" % (codepath, datestamp))
-if not os.path.isdir(crashdir):    
-    os.makedirs(crashdir)
-convert_pipe.config = dict(crashdump_dir=crashdir) 
-reg_pipe.config = dict(crashdump_dir=crashdir)
-fit_pipe.config = dict(crashdump_dir=crashdir)
+for pipe in [convert_pipe, reg_pipe, fit_pipe]:
+    flutil.archive_crashdumps(pipe)
 
 def run_reg_pipe():
     angles = get_angle_groups(subject_list)
@@ -275,6 +271,9 @@ def run_reg_pipe():
     sidsource.iterables = ("sid", subject_list)
 
 if __name__ == "__main__":
-    convert_pipe.run()
-    run_reg_pipe()
-    fit_pipe.run()
+    if "cvt" in args.workflows:
+        convert_pipe.run()
+    if "reg" in args.workflows:
+        run_reg_pipe()
+    if "fit" in args.workflows:
+        fit_pipe.run()
