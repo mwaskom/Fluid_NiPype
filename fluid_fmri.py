@@ -1,20 +1,25 @@
+#! /usr/bin/env python
 """
 Main interface for GFluid fMRI Nipype code.
 """
 import os
+import sys
 import argparse
 import inspect
 from copy import deepcopy
 
 import nipype.pipeline.engine as pe
 import nipype.interfaces.io as nio
+import nipype.interfaces.fsl as fsl
 import nipype.interfaces.utility as util
 from nipype.interfaces.base import Bunch
 
 from workflows.preproc import preproc
 from workflows.registration import registration
-from workflows.fsl_model import fsl_model
-from workflows.fixed_fx import fixed_fx
+from workflows.fsl_model import volume_model
+from workflows.surface_projection import surfproj
+from workflows.fixed_fx_vol import fixed_fx as fixed_fx_volume
+from workflows.fixed_fx_surf import fixed_fx as fixed_fx_surface
 
 import fluid_utility as flutil
 
@@ -29,6 +34,8 @@ parser.add_argument("-subjects", nargs="*",
 parser.add_argument("-workflows", nargs="*",
                     metavar="WF",
                     help="which workflows to run")
+parser.add_argument("-modelspace", metavar="space", dest="space", default="volume",
+                    help="space to run the model in (volume, surface)")
 parser.add_argument("-norun",dest="run",action="store_false",
                     help="do not run the pypeline")
 parser.add_argument("-inseries",action="store_true",
@@ -110,12 +117,12 @@ preprocreport = pe.Node(nio.DataSink(base_directory=report_dir),
                         name="preprocreport")
 
 # Preproc filename substitutions
-preprocsinksub = pe.Node(util.Merge(len(preproc_output.outputs.__dict__.keys())),
+preprocsinksub = pe.Node(util.Merge(len(preproc_output.outputs.__dict__)),
                          name="preprocsinksub")
 
 flutil.get_output_substitutions(preproc, preproc_output, preprocsinksub)
 
-preprocreportsub = pe.Node(util.Merge(len(preproc_report.outputs.__dict__.keys())),
+preprocreportsub = pe.Node(util.Merge(len(preproc_report.outputs.__dict__)),
                               name="preprocreportsub")
 
 flutil.get_output_substitutions(preproc, preproc_report, preprocreportsub)
@@ -204,12 +211,12 @@ registration.connect([
     ])
 
 # Registration filename substitutions
-regsinksub = pe.Node(util.Merge(len(reg_output.outputs.__dict__.keys())),
+regsinksub = pe.Node(util.Merge(len(reg_output.outputs.__dict__)),
                      name="regsinksub")
 
 flutil.get_output_substitutions(registration, reg_output, regsinksub)
 
-regreportsub = pe.Node(util.Merge(len(reg_report.outputs.__dict__.keys())),
+regreportsub = pe.Node(util.Merge(len(reg_report.outputs.__dict__)),
                        name="regreportsub")
 
 flutil.get_output_substitutions(registration, reg_report, regreportsub)
@@ -310,14 +317,9 @@ def subjectinfo(info, exp):
                             regressors=None))
     return output
 
-# Set the template and args for the timeseries in each space
-timeseries_template = dict(volume = dict(
-    timeseries=os.path.join("Analysis/NiPype",args.paradigm,"%s/registration/run_?/%s.nii.gz")))
-
-timeseries_args = dict(volume= [["subject_id", "warped_timeseries"]])
 
 # Set up the model workflow for each space 
-model = fsl_model.clone("volume_model")
+model = volume_model.clone("%s_model"%args.space)
 
 # Get model input and output
 model_input = model.get_node("inputspec")
@@ -328,19 +330,31 @@ model_report = model.get_node("report")
 modelsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
                                       outfields=["timeseries",
                                                  "outlier_files",
+                                                 "overlay_background",
                                                  "realignment_parameters"],
                                       base_directory = project_dir,
                                       sort_filelist=True),
                       name="modelsource")
 
 modelsource.inputs.template = os.path.join(
-    "Analysis/NiPype",args.paradigm ,"%s/preproc/run_?/%s")
+    "Analysis/NiPype",args.paradigm ,"%s/%s/run_?/%s")
 
 modelsource.inputs.template_args = dict(
-    outlier_files=[["subject_id", "outlier_files.txt"]],
-    realignment_parameters=[["subject_id", "realignment_parameters.par"]])
-modelsource.inputs.field_template = timeseries_template["volume"]
-modelsource.inputs.template_args["timeseries"] = timeseries_args["volume"]
+    outlier_files=[["subject_id", "preproc", "outlier_files.txt"]],
+    realignment_parameters=[["subject_id", "preproc", "realignment_parameters.par"]])
+
+# Set the template and args for the timeseries in each space
+if args.space == "volume":
+    modelsource.inputs.template_args["timeseries"] = [["subject_id", "registration", "warped_timeseries.nii.gz"]]
+    modelsource.inputs.field_template = dict(overlay_background=fsl.Info().standard_image("avg152T1.nii.gz"))
+    modelsource.inputs.template_args["overlay_background"] = [[]]
+elif args.space == "surface":
+    modelsource.inputs.template_args["timeseries"] = [["subject_id", "preproc", "unsmoothed_timeseries.nii.gz"]]
+    modelsource.inputs.template_args["overlay_background"] = [["subject_id", "preproc", "example_func.nii.gz"]]
+else:
+    sys.exit("Model space %s not recognized"%args.space)
+
+
 
 # Model Datasink nodes
 modelsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
@@ -349,7 +363,7 @@ modelsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
 modelreport = pe.Node(nio.DataSink(base_directory=report_dir),
                     name="modelreport")
 
-modelreportsub = pe.Node(util.Merge(len(model_report.outputs.__dict__.keys())),
+modelreportsub = pe.Node(util.Merge(len(model_report.outputs.__dict__)),
                        name="modelreportsub")
 
 flutil.get_output_substitutions(model, model_report, modelreportsub)
@@ -362,7 +376,6 @@ for r in range(exp.nruns):
     for node in ["modelestimate"]:
         modelsinknodesubs.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
 modelsink.inputs.substitutions = modelsinknodesubs
-
 
 modelreport_mapnodes = ["slicestats", "modelgen", "sliceresidual"]
 
@@ -401,15 +414,15 @@ model.connect([
     ])
 
 # Connect inputs
-flutil.connect_inputs(model, modelsource, model_input)
+flutil.connect_inputs(model, modelsource, model_input, makelist=["overlay_background"], listlength=exp.nruns)
 
 # Set up the subject containers
 flutil.subject_container(model, subjectsource, modelsink)
 flutil.subject_container(model, subjectsource, modelreport)
 
 # Connect the heuristic outputs to the datainks
-flutil.sink_outputs(model, model_output, modelsink, "model.%s"%"volume")
-flutil.sink_outputs(model, model_report, modelreport, "model.%s"%"volume")
+flutil.sink_outputs(model, model_output, modelsink, "model.%s"%args.space)
+flutil.sink_outputs(model, model_report, modelreport, "model.%s"%args.space)
 
 # Set the other model inputs
 model_input.inputs.TR = exp.TR
@@ -424,8 +437,86 @@ model.base_dir = working_dir
 # Set crashdumps
 flutil.archive_crashdumps(model)
 
+# Sampling to Surface
+# -------------------
+
+# Get sampling input and output
+surfproj_input = surfproj.get_node("inputspec")
+surfproj_output = surfproj.get_node("outputspec")
+
+# Surface sampling datasource
+surfsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
+                                     outfields=["reg_matrix",
+                                                "cope",
+                                                "varcope"],
+                                     base_directory=project_dir,
+                                     sort_filelist=True),
+                     name="surfsource")
+
+if args.space == "surface":
+    surfsource.inputs.template = "Analysis/NiPype/" + args.paradigm + "/%s/%s/run_?/%s%d.nii.gz"
+    surfsource.inputs.field_template = dict(
+        reg_matrix= "Analysis/NiPype/" + args.paradigm + "/%s/registration/run_?/register.dat")
+    surfsource.inputs.template_args = dict(cope = [["subject_id", "model/surface", "cope", "contrast"]],
+                                           varcope = [["subject_id", "model/surface", "varcope", "contrast"]],
+                                           reg_matrix = [["subject_id"]])
+
+# Connect contrast names to datasource, which wants a 1-based index
+def get_con_img_idx(contrast_name):
+    """Return the index corresponding to the name of a contrast."""
+    return [i+1 for i, data in enumerate(exp.contrasts) if data[0] == contrast_name][0]
+
+surfproj.connect(connames, ("contrast", get_con_img_idx), surfsource, "contrast")
+
+# Connect the inputs
+flutil.connect_inputs(surfproj, surfsource, surfproj_input, makelist = ["volume_file"])
+
+surfproj.connect([
+    (subjectsource, surfsource,   [("subject_id", "subject_id")]),
+    (subjectsource, surfproj_input, [("subject_id", "subject_id")]),
+    ])
+
+# Set the smoothing value
+surfproj_input.inputs.smooth_fwhm = 5.
+
+# Surf Projection Datasink
+surfprojsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
+                       name="surfprojsink")
+
+# Filename substitutions
+surfprojsinksub = pe.Node(util.Merge(len(surfproj_output.outputs.__dict__)),
+                          name="surfprojsinksub")
+
+flutil.get_output_substitutions(surfproj, surfproj_output, surfprojsinksub)
+
+flutil.sink_outputs(surfproj, surfproj_output, surfprojsink, "surfprojection")
+
+# Node substitutions
+surfproj_mapnodes = ["copesmoother","varcopesmoother"]
+surfprojsinknodesubs = flutil.get_mapnode_substitutions(exp.nruns, surfproj_mapnodes)
+surfprojsinknodesubs.extend([("_contrast_",""),("_hemi_","")])
+
+flutil.set_substitutions(surfproj, surfprojsink, surfprojsinksub, surfprojsinknodesubs)
+
+# Set up the subject containers
+flutil.subject_container(surfproj, subjectsource, surfprojsink)
+
+# Working output
+surfproj.base_dir = working_dir
+
+# Set crashdumps
+flutil.archive_crashdumps(surfproj)
+
+
 # Across-run Fixed Effects
 # ------------------------
+
+# Figure out which fixed_fx workflow we want
+fixed_fx = locals()["fixed_fx_%s"%args.space]
+
+# "Use" the fixed_fx workflows so pyflake shuts up
+_ = fixed_fx_volume
+_ = fixed_fx_surface
 
 # Get fixed_fx input and output
 ffx_input = fixed_fx.get_node("inputspec")
@@ -433,15 +524,31 @@ ffx_output = fixed_fx.get_node("outputspec")
 ffx_report = fixed_fx.get_node("report")
 
 # Fixed effects datasource node
-ffxsource = pe.Node(nio.DataGrabber(infields=["subject_id","contrast"],
-                                    outfields=["cope","varcope"],
-                                    base_directory = project_dir,
-                                    sort_filelist=True),
-                    name="ffxsource")
+if args.space == "volume":
+    ffxsource = pe.Node(nio.DataGrabber(infields=["subject_id","contrast"],
+                                        outfields=["cope","varcope"],
+                                        base_directory = project_dir,
+                                        sort_filelist=True),
+                        name="ffxsource")
 
-ffxsource.inputs.template = "Analysis/NiPype/" + args.paradigm + "/%s/model/volume/run_?/%s%d.nii.gz"
-ffxsource.inputs.template_args = dict(cope = [["subject_id", "cope", "contrast"]],
-                                      varcope = [["subject_id", "varcope", "contrast"]])
+    ffxsource.inputs.template = "Analysis/NiPype/" + args.paradigm + "/%s/model/volume/run_?/%s%d.nii.gz"
+    ffxsource.inputs.template_args = dict(cope = [["subject_id", "cope", "contrast"]],
+                                          varcope = [["subject_id", "varcope", "contrast"]])
+elif args.space == "surface":
+    ffxsource = pe.Node(nio.DataGrabber(infields=["subject_id","contrast","hemi"],
+                                        outfields=["cope"],
+                                        base_directory = project_dir,
+                                        sort_filelist=True),
+                        name="ffxsource")
+
+    ffxsource.inputs.template = "Analysis/NiPype/" + args.paradigm + "/%s/surfprojection/%s/%s/run_?/%s.nii.gz"
+    ffxsource.inputs.template_args = dict(cope = [["subject_id", "contrast", "hemi", "cope"]],
+                                          varcope = [["subject_id", "contrast", "hemi", "varcope"]])
+
+    hemisource = pe.Node(util.IdentityInterface(fields=["hemi"]),
+                         iterables=("hemi",["lh","rh"]),
+                         name="hemisource")
+    fixed_fx.connect(hemisource, "hemi", ffxsource, "hemi")
 
 # Fixed effects Datasink nodes
 ffxsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
@@ -452,29 +559,27 @@ ffxreport = pe.Node(nio.DataSink(base_directory=report_dir),
 
 # Fixed effects connections
 fixed_fx.connect(subjectsource, "subject_id", ffxsource, "subject_id")
+if args.space == "surface":
+    fixed_fx.connect(hemisource, "hemi", ffx_input, "hemi")
 
-# Connect contrast names to datasource, which wants a 1-based index
-def get_con_img_idx(contrast_name):
-    """Return the index corresponding to the name of a contrast."""
-    return [i+1 for i, data in enumerate(exp.contrasts) if data[0] == contrast_name][0]
-
-fixed_fx.connect(connames, ("contrast", get_con_img_idx), ffxsource, "contrast")
+# Connect contrast names to datasource
+fixed_fx.connect(connames, "contrast", ffxsource, "contrast")
 
 # Fixed effects filename substitutions
-ffxsinksub = pe.Node(util.Merge(len(ffx_output.outputs.__dict__.keys())),
+ffxsinksub = pe.Node(util.Merge(len(ffx_output.outputs.__dict__)),
                      name="ffxsinksub")
 
 flutil.get_output_substitutions(fixed_fx, ffx_output, ffxsinksub)
 
-ffxreportsub = pe.Node(util.Merge(len(ffx_report.outputs.__dict__.keys())),
+ffxreportsub = pe.Node(util.Merge(len(ffx_report.outputs.__dict__)),
                        name="ffxreportsub")
 
 flutil.get_output_substitutions(fixed_fx, ffx_report, ffxreportsub)
 
 # Fixed effects node substitutions
-flutil.set_substitutions(fixed_fx, ffxsink, ffxsinksub, [("_contrast_", "")])
+flutil.set_substitutions(fixed_fx, ffxsink, ffxsinksub, [("_contrast_", ""), ("_hemi_","")])
 
-flutil.set_substitutions(fixed_fx, ffxreport, ffxreportsub, [("_contrast_", "")])
+flutil.set_substitutions(fixed_fx, ffxreport, ffxreportsub, [("_contrast_", ""), ("_hemi_","")])
 
 # Connect the inputs
 flutil.connect_inputs(fixed_fx, ffxsource, ffx_input, makelist = ["cope", "varcope"])
@@ -493,25 +598,32 @@ fixed_fx.base_dir = working_dir
 # Set crashdumps
 flutil.archive_crashdumps(fixed_fx)
 
+def report():
+    if __file__ == "fluid_fmri.py":
+        report_script = "python /mindhive/gablab/fluid/Nipype_Code/reporting/build_report.py "
+    else:
+        report_script = "python /dev/null "
+    os.system(report_script + " ".join(subject_list))
+        
+
 if __name__ == "__main__":
     if args.run:
-        if __file__ == "fluid_fmri.py":
-            report_script = "python /mindhive/gablab/fluid/Nipype_Code/reporting/build_report.py "
-        else:
-            report_script = "python /dev/null "
-        
         if "preproc" in args.workflows:
             preproc.run(inseries=args.inseries)
-            os.system(report_script + " ".join(subject_list))
+            report()
         
         if "reg" in args.workflows:
             registration.run(inseries=args.inseries)
-            os.system(report_script + " ".join(subject_list))
+            report()
         
         if "model" in args.workflows:
             model.run(inseries=args.inseries)
-            os.system(report_script + " ".join(subject_list))
+            report()
         
+        if "surfproj" in args.workflows:
+            surfproj.run(inseries=args.inseries)
+            report()
+
         if "ffx" in args.workflows:
             fixed_fx.run(inseries=args.inseries)
-            os.system(report_script + " ".join(subject_list))
+            report()
