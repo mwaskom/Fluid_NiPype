@@ -40,16 +40,16 @@ Experiment
 ----------
 Package with modules containing paradigm information.
 
-``iq_experiment.py`` -- 
+``iq.py`` -- 
 fMRI paradigm with psychometric tasks.
 
-``nback_experiment.py`` -- 
+``nback.py`` -- 
 Dual (auditory letter-matching/spatial) N-Back task.
 
-``mot_block_experiment.py`` -- 
+``mot_block.py`` -- 
 Blocked multiple object tracking.
 
-``mot_jitter_experiment.py`` -- 
+``mot_jitter.py`` -- 
 Event-related multiple object tracking.
 
 Structural Analysis
