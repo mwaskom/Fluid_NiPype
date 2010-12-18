@@ -1,7 +1,8 @@
+#! /usr/bin/env python
 """
 Nipype module for the analysis of multispectral FLASH images
-"""
 
+"""
 import os
 import argparse
 from glob import glob
@@ -33,7 +34,7 @@ if args.workflows == ["all"]:
     args.workflows = ["cvt", "reg", "fit"]
 
 if args.subjects is None:
-    subject_list = ["gf21","gf23","gf26","gf27","gf29","gf30","gf32"]
+    subject_list = []
 else:
     subject_list = args.subjects
 
@@ -145,12 +146,13 @@ reg_pipe = pe.Workflow(name="registration_pipe",
 anglesource = pe.Node(util.IdentityInterface(fields=["alpha"]),name="anglesource")
 
 # Collect FLASH images in compressed mgh format from the Data directory
-flashgrabber = pe.Node(nio.DataGrabber(infields=["alpha","sid"],outfields=["flash_files"]),
+flashgrabber = pe.Node(nio.DataGrabber(infields=["alpha","sid"],
+                                       outfields=["flash_echos"]),
                        name="flashgrabber")
 
 flashgrabber.inputs.base_directory = os.path.join(data_dir)
 flashgrabber.inputs.template = "%s/flash/flash_%02d-?.mgz"
-flashgrabber.inputs.template_args = dict(flash_files=[["sid", "alpha"]])
+flashgrabber.inputs.template_args = dict(flash_echos=[["sid", "alpha"]])
 
 
 # Collect the RMS Flash images that were converted earlier
@@ -159,7 +161,7 @@ rmsgrabber = pe.Node(nio.DataGrabber(infields=["alpha","sid"],outfields=["flash_
 
 rmsgrabber.inputs.base_directory = os.path.join(data_dir)
 rmsgrabber.inputs.template = "%s/flash/flash_%02d-rms.mgz"
-rmsgrabber.inputs.template_args = dict(flash_files=[["sid", "alpha"]])
+rmsgrabber.inputs.template_args = dict(flash_rms=[["sid", "alpha"]])
 
 # Convert the RMS image to nifti so BET can read it
 cvt2nii = pe.Node(fs.MRIConvert(out_type="niigz"), name="cvt2nii")
@@ -196,7 +198,7 @@ reg_pipe.connect([
     (anglesource,  coregister,   [(("alpha", lambda x: angle2contrast[x]), "contrast_type")]),
     (stripflash,   coregister,   [("out_file", "source_file")]),
     (coregister,   applyxfm,     [("out_reg_file", "reg_file")]),
-    (flashgrabber, applyxfm,     [("flash_files", "source_file")]),
+    (flashgrabber, applyxfm,     [("flash_echos", "source_file")]),
     (sidsource,    xfmsink,      [("sid", "container"),
                                   (("sid", lambda x: "_sid_" + x), "strip_dir")]),
     (applyxfm,     xfmsink,      [("transformed_file", "coregistration.@flash_files")]),
@@ -209,11 +211,11 @@ reg_pipe.connect([
 fit_pipe = pe.Workflow(name="parameter_estimation_pipe",base_dir=working_base)
 
 # Grab all of the coregistered FLASH images from the analysis directory
-regflashgrabber = pe.Node(nio.DataGrabber(infields=["sid"],outfields=["flash_files"]),
+regflashgrabber = pe.Node(nio.DataGrabber(infields=["sid"],outfields=["flash_echos"]),
                           name="regflashgrabber")
 regflashgrabber.inputs.base_directory = analysis_dir
 regflashgrabber.inputs.template = "%s/coregistration/flash_??-?.mgz"
-regflashgrabber.inputs.template_args = dict(flash_files=[["sid"]])
+regflashgrabber.inputs.template_args = dict(flash_echos=[["sid"]])
 
 # Estimate tissue parameters
 fitparams = pe.Node(fs.FitMSParams(), name="fitparams")
@@ -223,11 +225,11 @@ hemisource.iterables = ("hemi", ["lh","rh"])
 
 # Sample the T1 volume onto the cortical surface
 t1surf = pe.Node(fs.SampleToSurface(reg_header=True,
-                                    sampling_method="point",
                                     sampling_range=.5,
                                     sampling_units="frac",
                                     cortex_mask=True),
                  name="t1surf")
+t1surf.inputs.sampling_method="point"
 
 #Take screenshots of the T1 parameters on the surface
 surfshots = pe.Node(fs.SurfaceScreenshots(surface="inflated",
@@ -242,7 +244,7 @@ paramsink = pe.Node(nio.DataSink(base_directory=analysis_dir),name="paramsink")
 paramsink.inputs.parameterization = False
 fit_pipe.connect([
     (sidsource,        regflashgrabber, [("sid", "sid")]), 
-    (regflashgrabber,  fitparams,       [("flash_files", "in_files")]),
+    (regflashgrabber,  fitparams,       [("flash_echos", "in_files")]),
     (fitparams,        t1surf,          [("t1_image", "source_file")]),
     (sidsource,        t1surf,          [("sid", "subject_id")]),
     (hemisource,       t1surf,          [("hemi", "hemi")]),
