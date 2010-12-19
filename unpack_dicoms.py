@@ -1,3 +1,4 @@
+#! /usr/bin/env python
 """
 DICOM conversion and preprocessing script for Fluid Intelligence project.
 
