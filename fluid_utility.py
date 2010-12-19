@@ -15,6 +15,10 @@ def subject_container(workflow, subjectsource, datasinknode, stripstring=None):
 
 def substitute(origpath, subname):
     """Generate a list of substitution tuples."""
+    # We might just be replacing "hemi" with the correct hemisphere
+    if subname == "hemi":
+        return [("_hemi_%s"%origpath, ""), (subname, origpath)]
+    # Otherwise, they are probably paths
     if not isinstance(origpath, list):
         origpath = [origpath]
     substitutes = []
@@ -51,8 +55,19 @@ def get_mapnode_substitutions(nruns, nodes):
 def set_substitutions(workflow, sinknode, mergenode, substitutions):
 
     workflow.connect(
-	mergenode, ("out", lambda x: x + substitutions), sinknode, "substitutions")
+    	mergenode, ("out", build_sub_list, substitutions), sinknode, "substitutions")
 
+def build_sub_list(merged_subs, additional_subs):
+
+    full_subs = merged_subs + additional_subs
+    # Move the hemi tuple to the end (if it exists), as it is a replacement of a replacement
+    # It's entirely possible that I'm going to have no idea why I did this in a few days...
+    for hemi in ["lh", "rh"]:
+        try:
+            full_subs.append(full_subs.pop(full_subs.index(("hemi",hemi))))
+        except ValueError:
+            pass
+    return full_subs
 
 def connect_inputs(workflow, datagrabber, inputnode, makelist=[], listlength=None):
     """Connect the outputs of a Datagrabber to an inputnode.

@@ -9,6 +9,7 @@ registration = pe.Workflow(name="registration")
 
 # Define the inputs for the registation workflow
 inputnode = pe.Node(util.IdentityInterface(fields=["subject_id",
+                                                   "smooth_fwhm",
                                                    "warpfield",
                                                    "mean_func",
                                                    "example_func",
@@ -69,11 +70,42 @@ exwarppng = pe.MapNode(fsl.Slicer(middle_slices=True,
                        iterfield=["in_file"],
                        name="exwarppng")
 
+hemisource = pe.Node(util.IdentityInterface(fields=["hemi"]),
+                     iterables=("hemi",["lh","rh"]),
+                     name="hemisource")
+
+surfproject = pe.MapNode(fs.SampleToSurface(sampling_range=(0,1,.1),
+                                            sampling_units="frac",
+                                            cortex_mask=True),
+                         iterfield=["source_file", "reg_file"],
+                         name="surfproject")
+surfproject.inputs.sampling_method="average"
+
+surftransform = pe.MapNode(fs.SurfaceTransform(target_subject="fsaverage"),
+                           iterfield=["source_file"],
+                           name="surftransform")
+
+smoothnormsurf = pe.MapNode(fs.SurfaceSmooth(subject_id="fsaverage",
+                                             reshape=True),
+                            iterfield=["in_file"],
+                            name="smoothnormsurf")
+
+smoothnatsurf = pe.MapNode(fs.SurfaceSmooth(),
+                           iterfield=["in_file"],
+                           name="smoothnativesurf")
+
+cvtnormsurf = pe.MapNode(fs.MRIConvert(out_type="niigz"),
+                         iterfield=["in_file"],
+                         name="convertnormsurf")
+
 outputnode = pe.Node(util.IdentityInterface(fields=["warped_timeseries",
                                                     "warped_example_func",
                                                     "warped_functional_mask",
                                                     "warped_mean_func",
-                                                    "register"]),
+                                                    "hemi_timeseries",
+                                                    "hemi_timeseries_fsaverage",
+                                                    "register",
+                                                    "hemi"]),
                      name="outputspec")
 
 report = pe.Node(util.IdentityInterface(fields=["func2anat", 
@@ -101,11 +133,29 @@ registration.connect([
     (warpts,       meanwarp,       [("out_file", "in_file")]),
     (warpex,       exwarppng,      [("out_file", "in_file")]),
     (warpmask,     warpmaskpng,    [("out_file", "in_file")]),	
+    (inputnode,    surfproject,    [("surf_timeseries", "source_file"),
+                                    ("subject_id", "subject_id")]),
+    (surfproject,  surftransform,  [("out_file", "source_file")]),
+    (inputnode,    surftransform,  [("subject_id", "source_subject")]),
+    (hemisource,   surftransform,  [("hemi", "hemi")]),
+    (surftransform,smoothnormsurf, [("out_file", "in_file")]),
+    (hemisource,   smoothnormsurf, [("hemi", "hemi")]),
+    (inputnode,    smoothnormsurf, [("smooth_fwhm", "fwhm")]),
+    (surfproject,  smoothnatsurf,  [("out_file", "in_file")]),
+    (hemisource,   smoothnatsurf,  [("hemi", "hemi")]),
+    (inputnode,    smoothnatsurf,  [("subject_id", "subject_id"),
+                                    ("smooth_fwhm", "fwhm")]),
+    (func2anat,    surfproject,    [("out_reg_file", "reg_file")]),
+    (hemisource,   surfproject,    [("hemi", "hemi")]),
+    (smoothnormsurf, cvtnormsurf, [("out_file", "in_file")]),
+    (cvtnormsurf,  outputnode,     [("out_file", "hemi_timeseries_fsaverage")]),
+    (smoothnatsurf,outputnode,     [("out_file", "hemi_timeseries")]),
     (warpex,       outputnode,     [("out_file", "warped_example_func")]),
     (func2anat,    outputnode,     [("out_reg_file", "register")]),
     (warpts,       outputnode,     [("out_file", "warped_timeseries")]),
     (warpmask,     outputnode,     [("out_file", "warped_functional_mask")]),
     (meanwarp,     outputnode,     [("out_file", "warped_mean_func")]),
+    (hemisource,   outputnode,     [("hemi", "hemi")]),
     (func2anat,    report,         [("min_cost_file", "func2anat_cost")]),
     (func2anatpng, report,         [("out_file", "func2anat")]),
     (warpmaskpng,  report,         [("out_file", "functional_mask_warp")]),

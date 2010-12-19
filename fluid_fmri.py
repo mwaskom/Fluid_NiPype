@@ -6,6 +6,7 @@ import os
 import sys
 import argparse
 import inspect
+from warnings import warn
 from copy import deepcopy
 
 import nipype.pipeline.engine as pe
@@ -210,6 +211,10 @@ registration.connect([
     (subjectsource, reg_input, [("subject_id", "subject_id")]),
     ])
 
+# Assign a smoothing value for the registration workflow
+reg_input.inputs.smooth_fwhm = 0.
+warn("\nWARNING:\n\nYou haven't decided on a surface smoothing kernel yet")
+
 # Registration filename substitutions
 regsinksub = pe.Node(util.Merge(len(reg_output.outputs.__dict__)),
                      name="regsinksub")
@@ -222,7 +227,8 @@ regreportsub = pe.Node(util.Merge(len(reg_report.outputs.__dict__)),
 flutil.get_output_substitutions(registration, reg_report, regreportsub)
 
 # Registration node substitutions
-reg_mapnodes = ["func2anat","warptimeseries","warpexample","warpmask","meanwarp"]
+reg_mapnodes = ["func2anat","warptimeseries","warpexample","warpmask","meanwarp",
+                "convertnormsurf","smoothnativesurf"]
 regsinknodesubs = flutil.get_mapnode_substitutions(exp.nruns, reg_mapnodes)
 
 flutil.set_substitutions(registration, regsink, regsinksub, regsinknodesubs)
