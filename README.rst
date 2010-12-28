@@ -41,7 +41,7 @@ Experiment
 Package with modules containing paradigm information.
 
 ``iq.py`` -- 
-fMRI paradigm with psychometric tasks.
+fMRI paradigm with fluid reasoning tasks.
 
 ``nback.py`` -- 
 Dual (auditory letter-matching/spatial) N-Back task.

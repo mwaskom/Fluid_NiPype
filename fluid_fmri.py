@@ -135,7 +135,7 @@ preproc_mapnodes = ["art", "dilatemask", "highpass", "masksmoothfunc",
                     "extractref", "meanfunc2", "realign"]
 preprocsinknodesubs = flutil.get_mapnode_substitutions(exp.nruns, preproc_mapnodes)
 
-preproc_report_mapnodes = []
+preproc_report_mapnodes = ["art","plotmean","realign"]
 for plot in ["displacement", "rotation", "translation"]:
     preproc_report_mapnodes.append("plot%s"%plot)
 for img in ["example", "mean"]:
@@ -352,7 +352,7 @@ modelsource.inputs.template_args = dict(
 # Set the template and args for the timeseries in each space
 if args.space == "volume":
     modelsource.inputs.template_args["timeseries"] = [["subject_id", "registration", "warped_timeseries.nii.gz"]]
-    modelsource.inputs.field_template = dict(overlay_background=fsl.Info().standard_image("avg152T1.nii.gz"))
+    modelsource.inputs.field_template = dict(overlay_background=fsl.Info().standard_image("MNI152_T1_2mm_brain.nii.gz"))
     modelsource.inputs.template_args["overlay_background"] = [[]]
 elif args.space == "surface":
     modelsource.inputs.template_args["timeseries"] = [["subject_id", "preproc", "unsmoothed_timeseries.nii.gz"]]
@@ -604,11 +604,12 @@ fixed_fx.base_dir = working_dir
 # Set crashdumps
 flutil.archive_crashdumps(fixed_fx)
 
+if __file__.endswith("fluid_fmri.py"):
+    report_script = "python /mindhive/gablab/fluid/Nipype_Code/reporting/build_report.py "
+    print "Building report"
+else:
+    report_script = "python /dev/null "
 def report():
-    if __file__ == "fluid_fmri.py":
-        report_script = "python /mindhive/gablab/fluid/Nipype_Code/reporting/build_report.py "
-    else:
-        report_script = "python /dev/null "
     os.system(report_script + " ".join(subject_list))
         
 

@@ -48,7 +48,8 @@ warpex = pe.MapNode(fsl.ApplyWarp(ref_file=mni152),
                     iterfield=["in_file", "premat"],
                     name="warpexample")
 
-warpmask = pe.MapNode(fsl.ApplyWarp(ref_file=mni152),
+warpmask = pe.MapNode(fsl.ApplyWarp(ref_file=mni152,
+                                    interp="nn"),
                       iterfield=["in_file", "premat"],
                       name="warpmask")
 
@@ -147,7 +148,7 @@ registration.connect([
                                     ("smooth_fwhm", "fwhm")]),
     (func2anat,    surfproject,    [("out_reg_file", "reg_file")]),
     (hemisource,   surfproject,    [("hemi", "hemi")]),
-    (smoothnormsurf, cvtnormsurf, [("out_file", "in_file")]),
+    (smoothnormsurf, cvtnormsurf,  [("out_file", "in_file")]),
     (cvtnormsurf,  outputnode,     [("out_file", "hemi_timeseries_fsaverage")]),
     (smoothnatsurf,outputnode,     [("out_file", "hemi_timeseries")]),
     (warpex,       outputnode,     [("out_file", "warped_example_func")]),

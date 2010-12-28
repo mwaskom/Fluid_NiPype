@@ -1,3 +1,4 @@
+#! /usr/bin/env python
 import os
 import sys
 from glob import glob
@@ -22,7 +23,7 @@ def main():
 
     matfiletemp = dict(nback="sub_%s_day%d_run%d_DUALNBACK.mat",
                        rt="sub_%s_r_%d_TEST_RT_FMRI.mat",
-                       iq="sub_%s_r_%d_s_scan%d_BLOCK_CATTELL.mat",
+                       iq="sub_%s_r_?_s_scan%d_BLOCK_CATTELL.mat",
                        mot="%s_Response*.mat")
     
     # Get directory locations
@@ -118,7 +119,7 @@ def gen_mot(matfiletemplate, day, subject, srcdir, trgdir):
 def gen_iq(matfiletemplate, day, subject, srcdir, trgdir):
     print "\nIQ\n======="
     try:
-        matfile = os.path.join(srcdir, matfiletemplate%(subject, day, day))
+        matfile = glob(os.path.join(srcdir, matfiletemplate%(subject, day)))[0]
         print "Reading %s"%matfile
         stE = scio.loadmat(matfile, struct_as_record=False, squeeze_me=True)["stE"]
         diffdict = dict(easy="LOW",hard="HIGH")

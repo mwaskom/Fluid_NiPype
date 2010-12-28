@@ -1,3 +1,4 @@
+#! /usr/bin/env python
 """
 Preprocessing module for Fluid Intelligence fMRI paradigms.
 
@@ -126,7 +127,7 @@ preprocsinknodesubs = flutil.get_mapnode_substitutions(1, preproc_mapnodes)
 # Change the exentsion on the realignment files so it plays nice with Conn
 preprocsinknodesubs.append((".par", ".txt"))
 
-preproc_report_mapnodes = ["realign"]
+preproc_report_mapnodes = ["realign", "art", "plotmean"]
 for plot in ["displacement", "rotation", "translation"]:
     preproc_report_mapnodes.append("plot%s"%plot)
 for img in ["example", "mean"]:

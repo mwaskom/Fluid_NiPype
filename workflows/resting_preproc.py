@@ -18,6 +18,11 @@ inputnode = pe.Node(util.IdentityInterface(fields=["timeseries",
                                                    "smooth_fwhm"]),
                     name="inputspec")
 
+# Remove the first two frames to account for the lack of dummy acquisitions
+trimmer = pe.MapNode(fsl.ExtractROI(t_min=2),
+                     iterfield=["in_file"],
+                     name="trimmer")
+
 # Convert functional images to float representation
 img2float = pe.MapNode(fsl.ImageMaths(out_data_type="float",
                                       op_string = "",
@@ -38,7 +43,9 @@ exampleslice = pe.MapNode(fsl.Slicer(image_width = 991,
 exampleslice.inputs.sample_axial=2
 
 # Motion correct to middle volume of each run
-realign =  pe.MapNode(fsl.MCFLIRT(save_mats = True,
+realign =  pe.MapNode(fsl.MCFLIRT(stages=4,
+                                  interpolation="sinc",
+                                  save_mats = True,
                                   save_plots = True,
                                   save_rms = True),
                       name="realign",
@@ -86,6 +93,14 @@ maskfunc1 = pe.MapNode(fsl.ImageMaths(suffix="_bet",
                        name = "maskfunc1")
 
 # Define function for the first set of connections
+def gettrimmedlength(func):
+    """Return the desired length after removing two frames."""
+    funcfile = func
+    if isinstance(func, list):
+        funcfile = func[0]
+    _,_,_,timepoints = nib.load(funcfile).get_shape()
+    return timepoints-2
+
 def getmiddlevolume(func):
     """Return the middle volume index."""
     funcfile = func
@@ -96,7 +111,9 @@ def getmiddlevolume(func):
 
 # Connect the nodes for the first stage of preprocessing
 preproc.connect([
-    (inputnode,  img2float,     [("timeseries", "in_file")]),
+    (inputnode,  trimmer,       [("timeseries", "in_file"),
+                                 (("timeseries", gettrimmedlength), "t_size")]),
+    (trimmer,    img2float,     [("roi_file", "in_file")]),
     (img2float,  extractref,    [("out_file", "in_file"), 
                                 (("out_file", getmiddlevolume), "t_min")]),
     (extractref, exampleslice,  [("roi_file", "in_file")]),
@@ -184,11 +201,17 @@ art = pe.MapNode(ra.ArtifactDetect(use_differences = [True, False],
                  iterfield=["realignment_parameters","realigned_files","mask_file"],
                  name="art")
 
+# Plot a timecourse of the global mean intensity
+plotmean = pe.MapNode(fsl.PlotTimeSeries(title="Global Mean Intensity"),
+                      iterfield=["in_file"],
+                      name="plotmean")
+
 # Make connections to ART
 preproc.connect([
     (realign,    art, [("par_file", "realignment_parameters")]),
     (maskfunc2,  art, [("out_file", "realigned_files")]),
     (dilatemask, art, [("out_file", "mask_file")]),
+    (art,        plotmean, [("intensity_files", "in_file")]),   
     ])
 
 # Merge the median values with the mean functional images into a coupled list
@@ -248,6 +271,8 @@ outputnode = pe.Node(util.IdentityInterface(fields=["smoothed_timeseries",
 reportnode = pe.Node(util.IdentityInterface(fields=["example_func",
                                                     "mean_func",
                                                     "rotation_plot",
+                                                    "outlier_volumes",
+                                                    "intensity_plot",
                                                     "translation_plot",
                                                     "displacement_plot"]),
                      name="report")
@@ -262,7 +287,9 @@ preproc.connect([
     (dilatemask,     outputnode, [("out_file", "functional_mask")]),
     (realign,        outputnode, [("par_file", "realignment_parameters")]),
     (art,            outputnode, [("outlier_files", "outlier_files")]),
+    (art,            reportnode, [("outlier_files", "outlier_volumes")]),
     (exampleslice,   reportnode, [("out_file", "example_func")]),
+    (plotmean,       reportnode, [("out_file", "intensity_plot")]),    
     (meanslice,      reportnode, [("out_file", "mean_func")]),
     (plotrot,        reportnode, [("out_file", "rotation_plot")]),
     (plottrans,      reportnode, [("out_file", "translation_plot")]),

@@ -19,6 +19,7 @@ Reporting node returns these files
     - Plotted estimated rotations from MCFLIRT
     - Plotted estimated translastion from MCFLIRT
     - Plotted estimated relative and absolute displacement from MCFLIRT
+    - Plotted global mean intensity value
     - Sliced png of the example func (MCFLIRT target)
     - Sliced png of the unsmoothed mean functional volume
 
@@ -57,7 +58,9 @@ exampleslice = pe.MapNode(fsl.Slicer(image_width = 572,
 exampleslice.inputs.sample_axial=2
 
 # Motion correct to middle volume of each run
-realign =  pe.MapNode(interface=fsl.MCFLIRT(save_mats = True,
+realign =  pe.MapNode(interface=fsl.MCFLIRT(stages=4,
+					    interpolation="sinc",
+					    save_mats = True,
                                             save_plots = True,
                                             save_rms = True),
                       name="realign",
@@ -187,17 +190,22 @@ art = pe.MapNode(interface=ra.ArtifactDetect(use_differences = [True, False],
                  iterfield=["realignment_parameters","realigned_files","mask_file"],
                  name="art")
 
+plotmean = pe.MapNode(fsl.PlotTimeSeries(title="Global Mean Intensity"),
+                      iterfield=["in_file"],
+                      name="plotmean")
+
 # Make connections to ART
 preproc.connect([
-    (realign,    art, [("par_file", "realignment_parameters")]),
-    (maskfunc2,  art, [("out_file", "realigned_files")]),
-    (dilatemask, art, [("out_file", "mask_file")]),
+    (realign,    art,      [("par_file", "realignment_parameters")]),
+    (maskfunc2,  art,      [("out_file", "realigned_files")]),
+    (dilatemask, art,      [("out_file", "mask_file")]),
+    (art,        plotmean, [("intensity_files", "in_file")]),
     ])
 
 # Scale the median value each voxel in the run to 10000
-intnorm = pe.MapNode(interface=fsl.ImageMaths(suffix="_gms"),
+meanscale = pe.MapNode(interface=fsl.ImageMaths(suffix="_gms"),
                      iterfield=["in_file","op_string"],
-                     name="intnorm")
+                     name="meanscale")
 
 # High-pass filter the timeseries
 highpass = pe.MapNode(interface=fsl.ImageMaths(suffix="_hpf",
@@ -225,7 +233,7 @@ medianval2 = pe.MapNode(interface=fsl.ImageStats(op_string="-k %s -p 50"),
 
 
 # Functions to get fslmaths op strings
-def getintnormop(medianvals):
+def getmeanscaleop(medianvals):
     """Get an fslmaths op string for intensity normalization."""
     return ["-mul %.10f"%(10000./val) for val in medianvals]
 
@@ -235,10 +243,10 @@ def gethpfop(cutoff):
 
 # Make connections to the intensity normalization and temporal filtering
 preproc.connect([
-    (maskfunc2, intnorm,    [("out_file", "in_file")]),
-    (medianval, intnorm,    [(("out_stat", getintnormop), "op_string")]),
+    (maskfunc2, meanscale,  [("out_file", "in_file")]),
+    (medianval, meanscale,  [(("out_stat", getmeanscaleop), "op_string")]),
     (inputnode, highpass,   [(("hpf_cutoff", gethpfop), "op_string")]),
-    (intnorm,   highpass,   [("out_file", "in_file")]),
+    (meanscale, highpass,   [("out_file", "in_file")]),
     (highpass,  meanfunc3,  [("out_file", "in_file")]),
     (meanfunc3, meanslice,  [("out_file", "in_file")]),
     (highpass,  medianval2, [("out_file", "in_file")]),
@@ -293,6 +301,8 @@ outputnode = pe.Node(util.IdentityInterface(fields=["smoothed_timeseries",
 # Define the outputs that will go into a report
 reportnode = pe.Node(util.IdentityInterface(fields=["example_func",
                                                     "mean_func",
+                                                    "intensity_plot",
+                                                    "outlier_volumes",
                                                     "rotation_plot",
                                                     "translation_plot",
                                                     "displacement_plot"]),
@@ -307,6 +317,8 @@ preproc.connect([
     (dilatemask,     outputnode, [("out_file", "functional_mask")]),
     (realign,        outputnode, [("par_file", "realignment_parameters")]),
     (art,            outputnode, [("outlier_files", "outlier_files")]),
+    (art,            reportnode, [("outlier_files", "outlier_volumes")]),
+    (plotmean,       reportnode, [("out_file", "intensity_plot")]),
     (exampleslice,   reportnode, [("out_file", "example_func")]),
     (meanslice,      reportnode, [("out_file", "mean_func")]),
     (plotrot,        reportnode, [("out_file", "rotation_plot")]),

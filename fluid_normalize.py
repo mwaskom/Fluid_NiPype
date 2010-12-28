@@ -5,13 +5,14 @@
 
 import os
 import sys
+import shutil
 import subprocess
 import nipype.interfaces.fsl as fsl
 import nipype.interfaces.freesurfer as fs
 from nipype.utils.filemanip import FileNotFoundError
 
 if len(sys.argv) < 2:
-    sys.exit("USAGE: fluid_normalize.py [-v -f] SUBJECT")
+    sys.exit("USAGE: %s [-v -clean -f] SUBJECT"%__file__)
 
 subject = sys.argv[-1]
 force = False
@@ -24,6 +25,7 @@ if "-v" in sys.argv:
 # Get target images
 target_brain = fsl.Info.standard_image("avg152T1_brain.nii.gz")
 target_head =  fsl.Info.standard_image("avg152T1.nii.gz")
+target_mask = fsl.Info.standard_image("MNI152_T1_2mm_brain_mask_dil.nii.gz")
 fnirt_cfg = "/usr/share/fsl/4.1/etc/flirtsch/T1_2_MNI152_2mm.cnf"
 
 # Get top-level dir
@@ -39,6 +41,7 @@ t1 = "T1.nii.gz"
 
 brain_flirted = "brain_flirted.nii.gz"
 t1_fnirted = "T1_fnirted.nii.gz"
+brain_fnirted = "brain_fnirted.nii.gz"
 
 flirtmat = "affine.mat"
 fnirtfield = "warpfield.nii.gz"
@@ -47,6 +50,8 @@ qcpng = "final_reg.png"
 
 # Set up the output dir
 regdir = os.path.join(subjdir, "normalization")
+if "-clean" in sys.argv and os.path.exists(regdir):
+    shutil.rmtree(regdir)
 try:
     os.mkdir(regdir)
 except:
@@ -56,22 +61,25 @@ origdir = os.getcwd()
 os.chdir(regdir)
 
 # Set up logging
-logfile = open("registration.log","w")
+logfile = open("normalization.log","w")
 
-def log(interface, result):
-    logfile.write("\n".join([interface.cmdline,
-                             result.runtime.stdout,
-                             result.runtime.stderr]))
+def log(interface, result=None):
+    if result is not None:
+        logfile.write("\n".join([interface.cmdline,
+                                 result.runtime.stdout,
+                                 result.runtime.stderr]))
+    else:
+        logfile.write(interface.cmdline)
 
 try:
-    # Brainmask to nifti
-    cvt = fs.MRIConvert(in_file=brain_mgz, out_file=brain)
+    # Norm to nifti
+    cvt = fs.MRIConvert(in_file=brain_mgz, out_file=brain, out_datatype="float")
     if force or not os.path.exists(brain):
         res = cvt.run()
         log(cvt, res)
 
-    # T1 to nifti
-    cvt = fs.MRIConvert(in_file=t1_mgz, out_file=t1)
+    # Nu to nifti
+    cvt = fs.MRIConvert(in_file=t1_mgz, out_file=t1, out_datatype="float")
     if force or not os.path.exists(t1):
         res = cvt.run()
         log(cvt, res)
@@ -93,17 +101,14 @@ try:
                       ref_file        = target_head,
                       config_file     = fnirt_cfg,
                       affine_file     = flirtmat,
-                      warped_file     = t1_fnirted,
+                      refmask_file    = target_mask,
+                      apply_refmask   = [0,0,0,0,1,1],
                       fieldcoeff_file = fnirtfield)
     if force or (not os.path.exists(t1_fnirted) or not os.path.exists(fnirtfield)):
         try:
             res = fnirt.run()
-        # FNIRT is currently being weird about writing
-        # files with names other than the defaults that
-        # get generated, so we'll deal with that here
         except FileNotFoundError:
-            if not os.path.exists(fnirtfield):
-                raise FileNotFoundError("%s was not written by FNIRT")
+            res = None
         log(fnirt, res)
 
     # Move the FNIRT log contents into the main log
@@ -111,6 +116,31 @@ try:
     if os.path.exists(fnirtlog):
         logfile.write(open(fnirtlog).read())
         os.remove(fnirtlog)
+   
+    # Apply the warp to the T1 and brain images
+    warpt1 = fsl.ApplyWarp(in_file    = t1,
+                           field_file = fnirtfield,
+                           ref_file   = target_brain,
+                           interp     = "sinc",
+                           out_file   = t1_fnirted)
+    if force or not os.path.exists(t1_fnirted):
+        try:
+            res = warpt1.run()
+        except FileNotFoundError:
+            res = None
+        log(warpt1, res)
+    
+    warpbrain = fsl.ApplyWarp(in_file    = brain,
+                              field_file = fnirtfield,
+                              ref_file   = target_brain,
+                              interp     = "sinc",
+                              out_file   = brain_fnirted)
+    if force or not os.path.exists(brain_fnirted):
+        try:
+            res = warpbrain.run()
+        except FileNotFoundError:
+            res = None
+        log(warpbrain, res)
 
     # Slice output for qc
     if force or not os.path.exists(qcpng):
@@ -125,7 +155,7 @@ try:
 
         for i, shot in enumerate(shots):
             cmd = ["/usr/share/fsl/4.1/bin/slicer", 
-                   t1_fnirted, 
+                   brain_fnirted, 
                    target_brain,
                    "-%s"%options[i][0],
                    options[i][1],
