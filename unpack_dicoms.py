@@ -10,10 +10,10 @@ Steps:
  - Run the Freesurfer reconstruction pipeline
  - Preprocesses DWI images
  - Perform spatial normalization to FSL's template with FLIRT and FNIRT
+ - Preprocess fieldmaps
 """
 import os
 import sys
-import shutil
 import time
 from datetime import datetime
 import subprocess
@@ -47,8 +47,10 @@ parser.add_argument("-norecon", dest="recon", action="store_false",
                     help="don't run recon-all after unpacking")
 parser.add_argument("-nodwi", dest="dwi", action="store_false",
                     help="don't run dt_recon to unpack the DWI image")
-parser.add_argument("-noreg", dest="reg", action="store_false",
+parser.add_argument("-nonorm", dest="norm", action="store_false",
                     help="don't perform FSL normalization")
+parser.add_argument("-nofieldmaps", dest="fieldmaps", action="store_false",
+                    help="don't preprocess the fieldmaps")
 parser.add_argument("-reparse", action="store_true",
                     help="force rerunning of the dicom directory parsing")
 parser.add_argument("-reconvert", action="store_true",
@@ -79,7 +81,7 @@ if not args.type:
 if args.type == "func":
     args.recon = False
     args.dwi = False
-    args.reg = False
+    args.norm = False
 
 # Initialize the subjectinfo dict
 subjectinfo = {}
@@ -102,9 +104,8 @@ if args.debug:
 for subject in subjects:
     targdir = os.path.join(datadir, subject, "dicom", args.type)
     if not os.path.exists(targdir) and args.fetch:
-        print "Fetching DICOMs for subect %s"subject
-        print "Writing to %s"%targdir
-        proc = subprocess.Popen("fetch_dicoms -s %s -l -d %s"%(subject, targdir)
+        os.system("fetch_dicoms -s %s -l -d %s"%(subject, targdir))
+
 
 # Pipeline functions
 # ------------------
@@ -510,7 +511,7 @@ for subj in subjects:
 
     # Perform spatial normalization
     # -----------------------------
-    if args.reg and os.path.exists(os.path.join(datadir, subj, "mri/orig/001.mgz")):
+    if args.norm and os.path.exists(os.path.join(datadir, subj, "mri/orig/001.mgz")):
         # Fluid_register command line
         sgescript.append(
             "python /mindhive/gablab/fluid/Nipype_Code/fluid_normalize.py %s"%subj)
@@ -552,4 +553,14 @@ for subj in subjects:
         stdout, stderr = proc.communicate()
         if args.debug:
             print stdout, stderr
-        
+
+# Preprocess Fieldmaps
+# --------------------
+protocols = dict(full="all",func="func",struc="dti rest")
+if args.fieldmaps:
+    cmd = "/mindhive/gablab/fluid/Nipype_Code/prepare_fieldmaps.py "
+    cmd += "-s "
+    cmd += " ".join(subjects)
+    cmd += "-p " + " ".join(protocols[args.type])
+    print "Preprocessing fieldmaps"
+    os.system(cmd)
