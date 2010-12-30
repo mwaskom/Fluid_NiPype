@@ -9,7 +9,6 @@ import shutil
 import subprocess
 import nipype.interfaces.fsl as fsl
 import nipype.interfaces.freesurfer as fs
-from nipype.utils.filemanip import FileNotFoundError
 
 if len(sys.argv) < 2:
     sys.exit("USAGE: %s [-v -clean -f] SUBJECT"%__file__)
@@ -64,12 +63,12 @@ os.chdir(regdir)
 logfile = open("normalization.log","w")
 
 def log(interface, result=None):
-    if result is not None:
-        logfile.write("\n".join([interface.cmdline,
-                                 result.runtime.stdout,
-                                 result.runtime.stderr]))
-    else:
-        logfile.write(interface.cmdline)
+    msg = "\n".join([interface.cmdline,
+                     result.runtime.stdout,
+                     result.runtime.stderr])
+    if v:
+        print msg
+    logfile.write(msg)
 
 try:
     # Norm to nifti
@@ -105,10 +104,7 @@ try:
                       apply_refmask   = [0,0,0,0,1,1],
                       fieldcoeff_file = fnirtfield)
     if force or (not os.path.exists(t1_fnirted) or not os.path.exists(fnirtfield)):
-        try:
-            res = fnirt.run()
-        except FileNotFoundError:
-            res = None
+        res = fnirt.run()
         log(fnirt, res)
 
     # Move the FNIRT log contents into the main log
@@ -124,10 +120,7 @@ try:
                            interp     = "sinc",
                            out_file   = t1_fnirted)
     if force or not os.path.exists(t1_fnirted):
-        try:
-            res = warpt1.run()
-        except FileNotFoundError:
-            res = None
+        res = warpt1.run()
         log(warpt1, res)
     
     warpbrain = fsl.ApplyWarp(in_file    = brain,
@@ -136,10 +129,7 @@ try:
                               interp     = "sinc",
                               out_file   = brain_fnirted)
     if force or not os.path.exists(brain_fnirted):
-        try:
-            res = warpbrain.run()
-        except FileNotFoundError:
-            res = None
+        res = warpbrain.run()
         log(warpbrain, res)
 
     # Slice output for qc
