@@ -556,11 +556,14 @@ for subj in subjects:
 
 # Preprocess Fieldmaps
 # --------------------
-protocols = dict(full="all",func="func",struc="dti rest")
+protocols = dict(full="func dti rest",func="func",struc="dti rest")
 if args.fieldmaps:
     cmd = "/mindhive/gablab/fluid/Nipype_Code/prepare_fieldmaps.py "
-    cmd += "-s "
+    cmd += " -s "
     cmd += " ".join(subjects)
-    cmd += "-p " + " ".join(protocols[args.type])
+    cmd += " -p " + protocols[args.type]
     print "Preprocessing fieldmaps"
+    if args.debug:
+        cmd += " -v "
+        print "Fieldmap call:\n", cmd
     os.system(cmd)

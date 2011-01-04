@@ -3,6 +3,8 @@ Preprocessing module for Fluid Intelligence fMRI paradigms.
 
 Input spec node takes three inputs:
     - Timeseries (image files)
+    - Voxel shift map
+    - Fieldmap brain (forward-warped skull-stripped magnitude volume)
     - Highpass filter cutoff (in TRs)
     - FWHM of smoothing kernel for SUSAN (in mms)
 
@@ -34,6 +36,8 @@ preproc = pe.Workflow(name="preproc")
 
 # Define the inputs for the preprocessing workflow
 inputnode = pe.Node(interface=util.IdentityInterface(fields=["timeseries",
+                                                             "voxel_shift_map",
+                                                             "fieldmap_brain",
                                                              "hpf_cutoff",
                                                              "smooth_fwhm"]),
                     name="inputspec")
@@ -97,9 +101,15 @@ stripmean = pe.MapNode(interface=fsl.BET(mask = True,
 
 # Use the mask from skullstripping to strip each timeseries
 maskfunc1 = pe.MapNode(interface=fsl.ImageMaths(suffix="_bet",
-                                               op_string="-mas"),
+                                                op_string="-mas"),
                        iterfield=["in_file", "in_file2"],
                        name = "maskfunc1")
+
+# Use the mask to strip the example func
+maskexample = pe.MapNode(fsl.ImageMaths(suffix="_bet",
+                                        op_string="-mas"),
+                         iterfield=["in_file", "in_file2"],
+                         name = "maskexample")
 
 # Define function for the first set of connections
 def getmiddlevolume(func):
@@ -125,6 +135,51 @@ preproc.connect([
     (meanfunc1,  stripmean,     [("out_file", "in_file")]),
     (realign,    maskfunc1,     [("out_file", "in_file")]),
     (stripmean,  maskfunc1,     [("mask_file", "in_file2")]),
+    (extractref, maskexample,   [("roi_file", "in_file")]),
+    (stripmean,  maskexample,   [("mask_file", "in_file2")]),
+    ])
+
+# Register the fieldmap magnitude volume to the example func
+regfieldmap = pe.MapNode(fsl.FLIRT(bins=256,
+                                   cost="corratio",
+                                   searchr_x=[-20, 20],
+                                   searchr_y=[-20, 20],
+                                   searchr_z=[-20, 20],
+                                   dof=6,
+                                   interp="trilinear"),
+                          iterfield=["reference"],
+                          name="regfieldmap")
+
+# Resample the voxel-shift map to match the timeseries
+resampvsm = pe.MapNode(interface=fsl.ApplyXfm(apply_xfm=True,
+                                              interp="trilinear"),
+                       iterfield=["reference", "in_matrix_file"],
+                       name="resamplevsm")
+
+# Dewarp the example func
+dewarpexfunc = pe.MapNode(fsl.FUGUE(),
+                          iterfield=["in_file", "shift_in_file", "mask_file"],
+                          name="dewarpexfunc")
+
+# Dewarp the timeseries
+dewarpts = pe.MapNode(fsl.FUGUE(),
+                          iterfield=["in_file", "shift_in_file", "mask_file"],
+                          name="dewarptimeseries")
+
+
+# Connect up the dewarping stages
+preproc.connect([
+    (inputnode,    regfieldmap,  [("fieldmap_brain", "in_file")]),
+    (maskexample,  regfieldmap,  [("out_file", "reference")]),
+    (regfieldmap,  resampvsm,    [("out_matrix_file", "in_matrix_file")]),
+    (inputnode,    resampvsm,    [("voxel_shift_map", "in_file")]),
+    (maskexample,  resampvsm,    [("out_file", "reference")]),
+    (resampvsm,    dewarpexfunc, [("out_file", "shift_in_file")]),
+    (maskexample,  dewarpexfunc, [("out_file", "in_file")]),
+    (stripmean,    dewarpexfunc, [("mask_file", "mask_file")]),
+    (resampvsm,    dewarpts,     [("out_file", "shift_in_file")]),
+    (maskfunc1,    dewarpts,     [("out_file", "in_file")]),
+    (stripmean,    dewarpts,     [("mask_file", "mask_file")]),
     ])
 
 # Determine the 2nd and 98th percentile intensities of each run

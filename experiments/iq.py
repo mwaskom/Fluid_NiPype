@@ -3,9 +3,9 @@
 """
 import re
 
-template_args = dict(timeseries=[["subject_id",["IQ_run?"]]])
+template_args = dict(timeseries=[["subject_id", "bold", ["IQ_run?"]]])
 
-source_template = "%s/bold/%s.nii.gz"
+source_template = "%s/%s/%s.nii.gz"
 
 hpcutoff = 128
 TR = 2.

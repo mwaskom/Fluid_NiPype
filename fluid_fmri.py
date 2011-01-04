@@ -102,13 +102,17 @@ preproc_report = preproc.get_node("report")
 
 # Preproc datasource node
 preprocsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
-                                        outfields=["timeseries"],
+                                        outfields=["timeseries",
+                                                   "voxel_shift_map",
+                                                   "fieldmap_brain"],
                                         base_directory=data_dir,
                                         template=exp.source_template,
                                         sort_filelist=True,
                                         ),
                         name="preprocsource")
 preprocsource.inputs.template_args = exp.template_args
+preprocsource.inputs.template_args["voxel_shift_map"] = [["subject_id", "fieldmaps", "func_voxel_shift_map"]]
+preprocsource.inputs.template_args["fieldmap_brain"] = [["subject_id", "fieldmaps", "func_warped_mag"]]
 
 # Preproc Datasink nodes
 preprocsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
