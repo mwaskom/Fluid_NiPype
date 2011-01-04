@@ -27,7 +27,7 @@ def main():
     for subj in args.subjects:
         mapdir = os.path.join(data_dir, subj, "fieldmaps")
         if not os.path.exists(mapdir):
-            print "Subject %s has no fieldmap directory"
+            print "Subject %s has no fieldmap directory"%subj
             continue
         for protocol in args.protocols:
             phase_image = prefixdict[protocol]+"_phase_fm"
@@ -48,7 +48,12 @@ def prepmap(mapdir, phase_image, mag_image, prefix, dwell_time, te_diff):
         os.chdir(mapdir)
 
         # Create a temporary directory for stuff
-        tmp = mkdtemp()
+        if args.tempdir is None:
+            tmp = mkdtemp()
+        else:
+            tmp = args.tempdir
+            if not os.path.exists(tmp):
+                os.mkdir(tmp)
 
         # Skullstrip the mag image
         brain = os.path.join(tmp, "brain")
@@ -78,11 +83,11 @@ def prepmap(mapdir, phase_image, mag_image, prefix, dwell_time, te_diff):
         origvsm = os.path.join(tmp, "orig_vsm")
         magdw = os.path.join(tmp, "mag_dw")
         runcmd(["fugue -i", mag_image, "-u", magdw, "-p", mergedphase, 
-                "--dwell=%.2f"%dwell_time, "--asym=%.2f"%te_diff,
+                "--dwell=%.6f"%(dwell_time*.001), "--asym=%.6f"%(te_diff*.001),
                 "--mask=%s"%brainmask, "--saveshift=%s"%origvsm,
                 "--smooth2=2"])
 
-        # Demean the voxel-shift map XXX make sure mask argument works
+        # Demean the voxel-shift map
         vsmmean = runcmd(["fslstats", origvsm, "-k", brainmask, "-m"], return_stdout=True)
         vsm = prefix + "_voxel_shift_map"
         runcmd(["fslmaths", origvsm, "-sub", vsmmean, "-mul", brainmask, vsm])
@@ -131,6 +136,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-subjects", nargs="*", help="subjects (requires Gf unpacking)")
     parser.add_argument("-protocols", nargs="*", help="func, dti, or rest")
+    parser.add_argument("-tempdir", help="use specified directory and don't clean up")
     parser.add_argument("-nocleanup", action="store_false", dest="cleanup",
                         help="do not remove temp dir")
     parser.add_argument("-verbose", action="store_true", help="verbose output")
@@ -139,4 +145,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.protocols==["all"]:
         args.protocols = ["func","dti","rest"]
+    if args.tempdir is not None:
+        args.cleanup = False
     main()
