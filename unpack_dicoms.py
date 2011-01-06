@@ -104,7 +104,7 @@ if args.debug:
 for subject in subjects:
     targdir = os.path.join(datadir, subject, "dicom", args.type)
     if not os.path.exists(targdir) and args.fetch:
-        os.system("fetch_dicoms -s %s -l -d %s"%(subject, targdir))
+        os.system("fetch_dicoms -s %s -l -q -d %s"%(subject, targdir))
 
 
 # Pipeline functions
