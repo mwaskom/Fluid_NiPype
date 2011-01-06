@@ -10,11 +10,9 @@ from scipy.io import loadmat
 from htmltools import HTMLReport
 
 
-DATA_DIR = "/Volumes/gablab/fluid/Data"
-MH_DATA_DIR = "/mindhive/gablab/fluid/Data"
-ANALYSIS_DIR = "/Volumes/gablab/fluid/Analysis/NiPype"
-MH_ANALYSIS_DIR = "/mindhive/gablab/fluid/Analysis/NiPype"
-REPORT_DIR = "/Volumes/gablab/fluid/Analysis/Report"
+DATA_DIR = "/mindhive/gablab/fluid/Data"
+ANALYSIS_DIR = "/mindhive/gablab/fluid/Analysis/NiPype"
+REPORT_DIR = "/mindhive/gablab/fluid/Analysis/Report"
 STAGES = ["behavioral", "preproc", "registration", "model", "stats", "fixed_effects"]
 FUNC_RUNS = dict(iq=1,nback=4,mot_block=1,mot_jitter=1,resting=1)
 
@@ -23,13 +21,13 @@ def main():
     if len(sys.argv) == 1:
         sys.exit("USAGE: build_report.py [subj ...]")
    
-    subjects = [s for s in sys.argv[1:] if os.path.exists(os.path.join(MH_DATA_DIR, s))]
+    subjects = [s for s in sys.argv[1:] if os.path.exists(os.path.join(DATA_DIR, s))]
 
     for subj in subjects:
     
         topics = ["recon-all","fnirt","dti_vbm"]
         for paradigm in FUNC_RUNS:
-            if os.path.exists(os.path.join(MH_ANALYSIS_DIR, paradigm, "report", subj)):
+            if os.path.exists(os.path.join(ANALYSIS_DIR, paradigm, "report", subj)):
                 topics.append(paradigm)
 
         for topic in topics:
@@ -45,7 +43,7 @@ def main():
 
 def write_subject_home(subj):
     
-    html = HTMLReport(os.path.join(MH_DATA_DIR, subj, "report", "report.html"))
+    html = HTMLReport(os.path.join(DATA_DIR, subj, "report", "report.html"))
 
     html.write_title("Subject %s Report"%subj)
     write_back_link(html, "home")
@@ -54,7 +52,7 @@ def write_subject_home(subj):
 
     topics = []
     for topic in ["recon-all", "fnirt", "dti_vbm"] + FUNC_RUNS.keys():
-        if os.path.exists(os.path.join(MH_DATA_DIR, subj, "report", "%s_report.html"%topic)):
+        if os.path.exists(os.path.join(DATA_DIR, subj, "report", "%s_report.html"%topic)):
             topics.append(topic)
     html.write_link_table("%s_report.html", "%s", topics, 10)
 
@@ -71,7 +69,7 @@ def write_back_link(html, targ, subj=None):
 
 def write_topic_home(subj, topic):
     
-    html = HTMLReport(os.path.join(MH_DATA_DIR, subj, "report", "%s_report.html"%topic))
+    html = HTMLReport(os.path.join(DATA_DIR, subj, "report", "%s_report.html"%topic))
     write_topic_head(html, subj, topic)
     if topic == "recon-all":
         write_recon_report(html, subj)
@@ -90,7 +88,7 @@ def write_topic_head(html, subj, topic):
 
 def write_func_report(subj, paradigm, stage):
 
-    html = HTMLReport(os.path.join(MH_DATA_DIR, subj, "report", "%s_%s.html"%(paradigm, stage)))
+    html = HTMLReport(os.path.join(DATA_DIR, subj, "report", "%s_%s.html"%(paradigm, stage)))
     write_topic_head(html, subj, paradigm)
 
     if stage == "behavioral":
@@ -109,15 +107,15 @@ def write_func_report(subj, paradigm, stage):
 
 def write_recon_report(html, subj):
 
-    status_log = os.path.join(MH_DATA_DIR, subj, "scripts","recon-all-status.log")
+    status_log = os.path.join(DATA_DIR, subj, "scripts","recon-all-status.log")
     if os.path.exists(status_log):
         status = [l for l in open(status_log)][-1]
         html.write_text("Recon status: %s"%status)
-        version = open(os.path.join(MH_DATA_DIR, subj, "scripts","build-stamp.txt")).read()
+        version = open(os.path.join(DATA_DIR, subj, "scripts","build-stamp.txt")).read()
         html.newline()
         html.write_text("Freesurfer version: %s"%version)
-        recon_log = os.path.join(MH_DATA_DIR, subj, "scripts", "recon-all.log")
-        recon_text = os.path.join(MH_DATA_DIR, subj, "scripts", "recon_log.txt")
+        recon_log = os.path.join(DATA_DIR, subj, "scripts", "recon-all.log")
+        recon_text = os.path.join(DATA_DIR, subj, "scripts", "recon_log.txt")
 	samba_recon_text = os.path.join(DATA_DIR, subj, "scripts", "recon_log.txt")
         shutil.copy(recon_log, recon_text)
         html.write_link("Recon-all Log", samba_recon_text)
@@ -158,7 +156,7 @@ def write_func_links(html, subj, paradigm):
 
 def write_bhvl_report(html, subj, paradigm):
 
-    srcdir = os.path.join(MH_DATA_DIR, subj, "fmri_bhvl")
+    srcdir = os.path.join(DATA_DIR, subj, "fmri_bhvl")
     if paradigm == "nback":
         write_nback_bhvl(html, subj, srcdir)
     elif paradigm == "iq":
@@ -286,7 +284,7 @@ def write_preproc_report(html, subj, paradigm):
         html.newline()
 
         try:
-            outfile = os.path.join(MH_ANALYSIS_DIR,paradigm,"report",subj,"preproc","run_%d"%r,"outlier_volumes.txt")
+            outfile = os.path.join(ANALYSIS_DIR,paradigm,"report",subj,"preproc","run_%d"%r,"outlier_volumes.txt")
             nout = len(open(outfile).read().strip().split())
             html.write_text("Total Outlier Volumes:&nbsp;",bold=True)
             html.write_text(nout)
@@ -306,7 +304,7 @@ def write_registration_report(html, subj, paradigm):
         
         html.write_section_head("Run %s"%r)
 
-        srcdir = os.path.join(MH_ANALYSIS_DIR, paradigm, "report", subj, "registration", "run_%d"%r)
+        srcdir = os.path.join(ANALYSIS_DIR, paradigm, "report", subj, "registration", "run_%d"%r)
         
         costfile = os.path.join(srcdir, "func2anat_cost.dat")
         try:
@@ -355,7 +353,7 @@ def write_stats_report(html, subj, paradigm):
 
     for r in range(1, FUNC_RUNS[paradigm] +1):
         html.write_section_head("Run %d"%r)
-        srcdir = os.path.join(MH_ANALYSIS_DIR,paradigm,"report",subj,"model","volume","stats")
+        srcdir = os.path.join(ANALYSIS_DIR,paradigm,"report",subj,"model","volume","stats")
         contrasts = [p.split("/")[-1] for p in glob(os.path.join(srcdir,"*"))]
         contrasts.sort()
         srcdir = os.path.join(ANALYSIS_DIR,paradigm,"report",subj,"model","volume","stats")
@@ -367,7 +365,7 @@ def write_stats_report(html, subj, paradigm):
 
 def write_ffx_report(html, subj, paradigm):
     
-    srcdir = os.path.join(MH_ANALYSIS_DIR,paradigm,"report",subj,"fixed_fx")
+    srcdir = os.path.join(ANALYSIS_DIR,paradigm,"report",subj,"fixed_fx")
     contrasts = [p.split("/")[-1] for p in glob(os.path.join(srcdir,"*"))]
     contrasts.sort()
     srcdir = os.path.join(ANALYSIS_DIR,paradigm,"report",subj,"fixed_fx")
@@ -385,8 +383,8 @@ def write_homepage():
     html.write_title("GFluid Imaging Report")
     html.newline()
     html.write_section_head("Subjects")
-    ante_subjects = [p.split("/")[-3] for p in glob(os.path.join(MH_DATA_DIR,"gf??","report","report.html"))]
-    post_subjects = [p.split("/")[-3] for p in glob(os.path.join(MH_DATA_DIR,"gf??p","report","report.html"))]
+    ante_subjects = [p.split("/")[-3] for p in glob(os.path.join(DATA_DIR,"gf??","report","report.html"))]
+    post_subjects = [p.split("/")[-3] for p in glob(os.path.join(DATA_DIR,"gf??p","report","report.html"))]
     ante_subjects.sort()
     post_subjects.sort()
     for subjlist in ante_subjects, post_subjects:
