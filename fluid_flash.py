@@ -40,9 +40,9 @@ else:
 
 # Hard code some paths
 # --------------------
-working_base = "/mindhive/gablab/fluid/Analysis/NiPype/workingdir/flash"
+working_base = "/mindhive/gablab/fluid/Analysis/Nipype/workingdir/flash"
 data_dir = "/mindhive/gablab/fluid/Data"
-analysis_dir = "/mindhive/gablab/fluid/Analysis/NiPype/flash"
+analysis_dir = "/mindhive/gablab/fluid/Analysis/Nipype/flash"
 
 # Functions to control dicom file sourcing
 # ----------------------------------------

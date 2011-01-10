@@ -82,9 +82,9 @@ print "Subjects: ", " ".join(subject_list)
 # Define some paths
 project_dir = "/mindhive/gablab/fluid"
 data_dir = os.path.join(project_dir, "Data")
-analysis_dir = os.path.join(project_dir, "Analysis/NiPype", args.paradigm)
-working_dir = os.path.join(project_dir, "Analysis/NiPype/workingdir", args.paradigm)
-report_dir = os.path.join(project_dir, "Analysis/NiPype", args.paradigm, "report")
+analysis_dir = os.path.join(project_dir, "Analysis/Nipype", args.paradigm)
+working_dir = os.path.join(project_dir, "Analysis/Nipype/workingdir", args.paradigm)
+report_dir = os.path.join(project_dir, "Analysis/Nipype", args.paradigm, "report")
 
 # Subject source node
 # -------------------
@@ -193,7 +193,7 @@ regsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
                                     sort_filelist=True),
                     name="regsource")
 
-regsource.inputs.template = "Analysis/NiPype/" + args.paradigm + "/%s/preproc/run_?/%s.nii.gz"
+regsource.inputs.template = "Analysis/Nipype/" + args.paradigm + "/%s/preproc/run_?/%s.nii.gz"
 regsource.inputs.field_template = dict(warpfield="Data/%s/normalization/%s.nii.gz")
 regsource.inputs.template_args = dict(mean_func=[["subject_id", "mean_func"]],
                                       example_func=[["subject_id", "example_func"]],
@@ -347,7 +347,7 @@ modelsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
                       name="modelsource")
 
 modelsource.inputs.template = os.path.join(
-    "Analysis/NiPype",args.paradigm ,"%s/%s/run_?/%s")
+    "Analysis/Nipype",args.paradigm ,"%s/%s/run_?/%s")
 
 modelsource.inputs.template_args = dict(
     outlier_files=[["subject_id", "preproc", "outlier_files.txt"]],
@@ -464,9 +464,9 @@ surfsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
                      name="surfsource")
 
 if args.space == "surface":
-    surfsource.inputs.template = "Analysis/NiPype/" + args.paradigm + "/%s/%s/run_?/%s%d.nii.gz"
+    surfsource.inputs.template = "Analysis/Nipype/" + args.paradigm + "/%s/%s/run_?/%s%d.nii.gz"
     surfsource.inputs.field_template = dict(
-        reg_matrix= "Analysis/NiPype/" + args.paradigm + "/%s/registration/run_?/register.dat")
+        reg_matrix= "Analysis/Nipype/" + args.paradigm + "/%s/registration/run_?/register.dat")
     surfsource.inputs.template_args = dict(cope = [["subject_id", "model/surface", "cope", "contrast"]],
                                            varcope = [["subject_id", "model/surface", "varcope", "contrast"]],
                                            reg_matrix = [["subject_id"]])
@@ -541,7 +541,7 @@ if args.space == "volume":
                                         sort_filelist=True),
                         name="ffxsource")
 
-    ffxsource.inputs.template = "Analysis/NiPype/" + args.paradigm + "/%s/model/volume/run_?/%s%d.nii.gz"
+    ffxsource.inputs.template = "Analysis/Nipype/" + args.paradigm + "/%s/model/volume/run_?/%s%d.nii.gz"
     ffxsource.inputs.template_args = dict(cope = [["subject_id", "cope", "contrast"]],
                                           varcope = [["subject_id", "varcope", "contrast"]])
 elif args.space == "surface":
@@ -551,7 +551,7 @@ elif args.space == "surface":
                                         sort_filelist=True),
                         name="ffxsource")
 
-    ffxsource.inputs.template = "Analysis/NiPype/" + args.paradigm + "/%s/surfprojection/%s/%s/run_?/%s.nii.gz"
+    ffxsource.inputs.template = "Analysis/Nipype/" + args.paradigm + "/%s/surfprojection/%s/%s/run_?/%s.nii.gz"
     ffxsource.inputs.template_args = dict(cope = [["subject_id", "contrast", "hemi", "cope"]],
                                           varcope = [["subject_id", "contrast", "hemi", "varcope"]])
 

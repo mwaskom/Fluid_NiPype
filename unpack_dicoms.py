@@ -312,7 +312,7 @@ datasink.inputs.parameterization = False
 
 # Workflow definition
 unpack = pe.Workflow(name="unpack_%s"%args.type)
-unpack.base_dir = "/mindhive/gablab/fluid/Analysis/NiPype/workingdir/unpack"
+unpack.base_dir = "/mindhive/gablab/fluid/Analysis/Nipype/workingdir/unpack"
 
 # Workflow connection
 unpack.connect(

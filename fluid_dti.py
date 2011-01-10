@@ -26,9 +26,9 @@ args = parser.parse_args()
 
 project_dir = "/mindhive/gablab/fluid/"
 data_dir = "/mindhive/gablab/fluid/Data"
-analysis_dir = "/mindhive/gablab/fluid/Analysis/NiPype/dti_vbm"
-working_dir = "/mindhive/gablab/fluid/Analysis/NiPype/workingdir/dti_vbm"
-report_dir = "/mindhive/gablab/fluid/Analysis/NiPype/dti_vbm/report"
+analysis_dir = "/mindhive/gablab/fluid/Analysis/Nipype/dti_vbm"
+working_dir = "/mindhive/gablab/fluid/Analysis/Nipype/workingdir/dti_vbm"
+report_dir = "/mindhive/gablab/fluid/Analysis/Nipype/dti_vbm/report"
 
 # Get all of the pre subjects as a default subject list 
 if args.subjects is None:

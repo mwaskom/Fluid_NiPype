@@ -49,9 +49,9 @@ args = parser.parse_args()
 
 project_dir = "/mindhive/gablab/fluid/"
 data_dir = "/mindhive/gablab/fluid/Data"
-analysis_dir = "/mindhive/gablab/fluid/Analysis/NiPype/resting"
-working_dir = "/mindhive/gablab/fluid/Analysis/NiPype/workingdir/resting"
-report_dir = "/mindhive/gablab/fluid/Analysis/NiPype/resting/report"
+analysis_dir = "/mindhive/gablab/fluid/Analysis/Nipype/resting"
+working_dir = "/mindhive/gablab/fluid/Analysis/Nipype/workingdir/resting"
+report_dir = "/mindhive/gablab/fluid/Analysis/Nipype/resting/report"
 
 # Get all of the pre subjects as a default subject list 
 if args.subjects is None:
@@ -166,7 +166,7 @@ regsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
                                     sort_filelist=True),
                     name="regsource")
 
-regsource.inputs.template = "Analysis/NiPype/resting/%s/preproc/run_?/%s.nii.gz"
+regsource.inputs.template = "Analysis/Nipype/resting/%s/preproc/run_?/%s.nii.gz"
 regsource.inputs.field_template = dict(warpfield="Data/%s/normalization/%s.nii.gz")
 regsource.inputs.template_args = dict(mean_func=[["subject_id", "mean_func"]],
                                       example_func=[["subject_id", "example_func"]],
