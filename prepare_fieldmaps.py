@@ -43,17 +43,18 @@ def main():
 def prepmap(mapdir, phase_image, mag_image, prefix, dwell_time, te_diff):
 
     try:
+        
+        # Create a temporary directory for stuff
+        if args.tmpdir is None:
+            tmp = mkdtemp()
+        else:
+            tmp = os.path.abspath(args.tmpdir)
+            if not os.path.exists(tmp):
+                os.mkdir(tmp)
+
         # Get situated
         origdir = os.getcwd()
         os.chdir(mapdir)
-
-        # Create a temporary directory for stuff
-        if args.tempdir is None:
-            tmp = mkdtemp()
-        else:
-            tmp = args.tempdir
-            if not os.path.exists(tmp):
-                os.mkdir(tmp)
 
         # Skullstrip the mag image
         brain = os.path.join(tmp, "brain")
@@ -136,7 +137,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-subjects", nargs="*", help="subjects (requires Gf unpacking)")
     parser.add_argument("-protocols", nargs="*", help="func, dti, or rest")
-    parser.add_argument("-tempdir", help="use specified directory and don't clean up")
+    parser.add_argument("-tmpdir", help="use specified directory and don't clean up")
     parser.add_argument("-nocleanup", action="store_false", dest="cleanup",
                         help="do not remove temp dir")
     parser.add_argument("-verbose", action="store_true", help="verbose output")
@@ -145,6 +146,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.protocols==["all"]:
         args.protocols = ["func","dti","rest"]
-    if args.tempdir is not None:
+    if args.tmpdir is not None:
         args.cleanup = False
     main()
