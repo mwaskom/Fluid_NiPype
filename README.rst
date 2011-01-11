@@ -58,8 +58,14 @@ Structural Analysis
 ``fluid_flash.py`` -- 
 Analysis of multispectral FLASH images.
 
+``fluid_tbss.py`` -- 
+Enhanced TBSS (tract-based segmentation statistics) workflow for DTI/R1 analysis
+
+``fluid_morph.py`` -- 
+Freesurfer cortical-reconstruction-based morphometric analysis.
+
 ``fluid_dti.py`` -- 
-Analysis of DTI-based images.
+VBM Analysis of DTI-based images.
 
 Misc
 ----
@@ -70,6 +76,9 @@ structural preprocessing.
 
 ``generate_parfiles.py`` -- 
 Script to read Psychtoolbox experiment files and create FSL parfiles.
+
+``prepapre_fieldmaps.py`` -- 
+Siemems/Fluid specific B0 fieldmap preprocessing.
 
 ``fluid_utility.py`` -- 
 Assorted functions used in our NiPype scripts.
