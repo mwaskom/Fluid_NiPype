@@ -232,12 +232,14 @@ t1surf = pe.Node(fs.SampleToSurface(reg_header=True,
 t1surf.inputs.sampling_method="point"
 
 #Take screenshots of the T1 parameters on the surface
+"""
 surfshots = pe.Node(fs.SurfaceScreenshots(surface="inflated",
                                           show_color_scale=True,
                                           show_gray_curv=True,
                                           six_images=True,
                                           overlay_range=(950,2500)),
                     name="surfshots")
+"""
 
 # Sink the T1 volumes and surfaces into the analysis directory
 paramsink = pe.Node(nio.DataSink(base_directory=analysis_dir),name="paramsink")
@@ -248,14 +250,14 @@ fit_pipe.connect([
     (fitparams,        t1surf,          [("t1_image", "source_file")]),
     (sidsource,        t1surf,          [("sid", "subject_id")]),
     (hemisource,       t1surf,          [("hemi", "hemi")]),
-    (sidsource,        surfshots,       [("sid", "subject")]),
-    (hemisource,       surfshots,       [("hemi", "hemi")]),
-    (t1surf,           surfshots,       [("out_file", "overlay")]),
+#    (sidsource,        surfshots,       [("sid", "subject")]),
+#    (hemisource,       surfshots,       [("hemi", "hemi")]),
+#    (t1surf,           surfshots,       [("out_file", "overlay")]),
     (sidsource,        paramsink,       [("sid", "container"),
                                          (("sid", lambda x: "_sid_"+x), "strip_dir")]),
     (fitparams,        paramsink,       [("t1_image", "tissue_parameters.@T1_vol")]),
     (t1surf,           paramsink,       [("out_file", "tissue_parameters.@T1_surf")]),
-    (surfshots,        paramsink,       [("screenshots", "screenshots.@images")]),
+#    (surfshots,        paramsink,       [("screenshots", "screenshots.@images")]),
     ])
 
 
