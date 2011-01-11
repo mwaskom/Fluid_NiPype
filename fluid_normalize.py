@@ -65,7 +65,7 @@ logfile = open("normalization.log","w")
 def log(interface, result=None):
     msg = "\n".join([interface.cmdline,
                      result.runtime.stdout,
-                     result.runtime.stderr])
+                     result.runtime.stderr, "\n"])
     if v:
         print msg
     logfile.write(msg)
