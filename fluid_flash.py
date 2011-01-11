@@ -4,6 +4,7 @@ Nipype module for the analysis of multispectral FLASH images
 
 """
 import os
+from os.path import join as pjoin
 import argparse
 from glob import glob
 import numpy as np
@@ -40,9 +41,10 @@ else:
 
 # Hard code some paths
 # --------------------
-working_base = "/mindhive/gablab/fluid/Analysis/Nipype/workingdir/flash"
-data_dir = "/mindhive/gablab/fluid/Data"
-analysis_dir = "/mindhive/gablab/fluid/Analysis/Nipype/flash"
+project_dir =  "/mindhive/gablab/fluid/"
+working_base = pjoin(project_dir, "Analysis/Nipype/workingdir/flash")
+data_dir = pjoin(project_dir, "Data")
+analysis_dir = pjoin(project_dir, "Analysis/Nipype/flash")
 
 # Functions to control dicom file sourcing
 # ----------------------------------------
