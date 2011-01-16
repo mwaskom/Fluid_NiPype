@@ -121,7 +121,8 @@ dcmgrabber.inputs.template_args=dict(dicom=[["sid","type","dcm"]])
 
 # Convert each FLASH echo to mgz format
 convertdcm = pe.MapNode(fs.MRIConvert(out_type="mgz"),
-                        name="convertdcm",iterfield=["args","in_file"])
+                        iterfield=["args","in_file"],
+                        name="convertdcm")
 
 # Save the converted FLASH images in the data directory
 sinkflash = pe.Node(nio.DataSink(base_directory=data_dir),name="sinkflash")
@@ -183,10 +184,18 @@ applyxfm = pe.MapNode(fs.ApplyVolTransform(fs_target=True),
                       iterfield=["source_file"],
                       name="applyxfm")
 
+# Get the subject's brain image
+getbrain = pe.Node(nio.FreeSurferSource(subjects_dir=data_dir), name="getbrain")
+
+# Use the brain image to skullstrip the aligned FLASH files
+maskflash = pe.MapNode(fs.ApplyMask(mask_thresh=1),
+                       iterfield=["in_file"],
+                       name="maskflash")
+
 # Sink the transformed images
 xfmsink = pe.Node(nio.DataSink(base_directory=analysis_dir),name="xfmsink")
 xfmsink.inputs.parameterization = False
-xfmsink.inputs.substitutions = [("_warped","")]
+xfmsink.inputs.substitutions = [("_warped_masked","")]
 
 
 reg_pipe.connect([
@@ -201,9 +210,11 @@ reg_pipe.connect([
     (stripflash,   coregister,   [("out_file", "source_file")]),
     (coregister,   applyxfm,     [("out_reg_file", "reg_file")]),
     (flashgrabber, applyxfm,     [("flash_echos", "source_file")]),
-    (sidsource,    xfmsink,      [("sid", "container"),
-                                  (("sid", lambda x: "_sid_" + x), "strip_dir")]),
-    (applyxfm,     xfmsink,      [("transformed_file", "coregistration.@flash_files")]),
+    (sidsource,    xfmsink,      [("sid", "container")]),
+    (sidsource,    getbrain,     [("sid", "subject_id")]),
+    (getbrain,     maskflash,    [("brain", "mask_file")]),
+    (applyxfm,     maskflash,    [("transformed_file", "in_file")]),
+    (maskflash,    xfmsink,      [("out_file", "coregistration.@flash_files")]),
     ])
 
 
@@ -213,7 +224,8 @@ reg_pipe.connect([
 fit_pipe = pe.Workflow(name="parameter_estimation_pipe",base_dir=working_base)
 
 # Grab all of the coregistered FLASH images from the analysis directory
-regflashgrabber = pe.Node(nio.DataGrabber(infields=["sid"],outfields=["flash_echos"]),
+regflashgrabber = pe.Node(nio.DataGrabber(infields=["sid"],
+                                          outfields=["flash_echos"]),
                           name="regflashgrabber")
 regflashgrabber.inputs.base_directory = analysis_dir
 regflashgrabber.inputs.template = "%s/coregistration/flash_??-?.mgz"
@@ -227,21 +239,16 @@ hemisource.iterables = ("hemi", ["lh","rh"])
 
 # Sample the T1 volume onto the cortical surface
 t1surf = pe.Node(fs.SampleToSurface(reg_header=True,
-                                    sampling_range=.5,
+                                    sampling_range=(.25,.75,.1),
                                     sampling_units="frac",
                                     cortex_mask=True),
                  name="t1surf")
-t1surf.inputs.sampling_method="point"
+t1surf.inputs.sampling_method="average"
 
-#Take screenshots of the T1 parameters on the surface
-"""
-surfshots = pe.Node(fs.SurfaceScreenshots(surface="inflated",
-                                          show_color_scale=True,
-                                          show_gray_curv=True,
-                                          six_images=True,
-                                          overlay_range=(950,2500)),
-                    name="surfshots")
-"""
+# Transform the native surface to fsaverage space
+surfxfm = pe.Node(fs.SurfaceTransform(target_subject="fsaverage"),
+                  name="surfacexfm")
+
 
 # Sink the T1 volumes and surfaces into the analysis directory
 paramsink = pe.Node(nio.DataSink(base_directory=analysis_dir),name="paramsink")
@@ -252,14 +259,13 @@ fit_pipe.connect([
     (fitparams,        t1surf,          [("t1_image", "source_file")]),
     (sidsource,        t1surf,          [("sid", "subject_id")]),
     (hemisource,       t1surf,          [("hemi", "hemi")]),
-#    (sidsource,        surfshots,       [("sid", "subject")]),
-#    (hemisource,       surfshots,       [("hemi", "hemi")]),
-#    (t1surf,           surfshots,       [("out_file", "overlay")]),
-    (sidsource,        paramsink,       [("sid", "container"),
-                                         (("sid", lambda x: "_sid_"+x), "strip_dir")]),
+    (t1surf,           surfxfm,         [("out_file", "source_file")]),
+    (sidsource,        surfxfm,         [("sid", "source_subject")]),
+    (hemisource,       surfxfm,         [("hemi", "hemi")]),
+    (sidsource,        paramsink,       [("sid", "container")]),
     (fitparams,        paramsink,       [("t1_image", "tissue_parameters.@T1_vol")]),
     (t1surf,           paramsink,       [("out_file", "tissue_parameters.@T1_surf")]),
-#    (surfshots,        paramsink,       [("screenshots", "screenshots.@images")]),
+    (surfxfm,          paramsink,       [("out_file", "tissue_parameters.@T1_fsaverage")]),
     ])
 
 
@@ -273,13 +279,13 @@ def run_reg_pipe():
     for anglegroup in angles:
         anglesource.iterables = ("alpha", anglegroup)
         sidsource.iterables = ("sid", angles[anglegroup])
-        reg_pipe.run()
+        reg_pipe.run(inseries=args.inseries)
     sidsource.iterables = ("sid", subject_list)
 
 if __name__ == "__main__":
     if "cvt" in args.workflows:
-        convert_pipe.run()
+        convert_pipe.run(inseries=args.inseries)
     if "reg" in args.workflows:
         run_reg_pipe()
     if "fit" in args.workflows:
-        fit_pipe.run()
+        fit_pipe.run(inseries=args.inseries)
