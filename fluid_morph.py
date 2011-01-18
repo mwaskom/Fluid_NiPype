@@ -101,6 +101,7 @@ mergegrabber = pe.Node(nio.DataGrabber(infields=["hemi", "metric", "fwhm"],
                                        template="gf??/%s.%s.fsaverage_smooth%d.mgz"),
                       name="mergegrabber")
 mergegrabber.inputs.template_args = dict(metric_maps=[["hemi", "metric", "fwhm"]])
+mergegrabber.overwrite=True
 
 merger = pe.Node(fs.Concatenate(),name="merger")
 

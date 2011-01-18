@@ -12,6 +12,23 @@ Uses code from workflows and experiment packages.
 Interface for resting state preprocessing and registration. 
 Uses code from workflows package.
 
+Structural Analysis
+-------------------
+
+``fluid_flash.py`` -- 
+Analysis of multispectral FLASH images.
+
+``fluid_tbss.py`` -- 
+Enhanced TBSS (tract-based segmentation statistics) workflow for DTI/R1 analysis
+
+``fluid_morph.py`` -- 
+Freesurfer cortical-reconstruction-based morphometric analysis.
+
+``fluid_vbm.py`` -- 
+Direct Nipype implementation of FSL VBM protocol.
+
+``fluid_dti.py`` -- 
+VBM Analysis of DTI-based images.
 
 Workflows
 ---------
@@ -51,24 +68,6 @@ Blocked multiple object tracking.
 
 ``mot_jitter.py`` -- 
 Event-related multiple object tracking.
-
-Structural Analysis
--------------------
-
-``fluid_flash.py`` -- 
-Analysis of multispectral FLASH images.
-
-``fluid_tbss.py`` -- 
-Enhanced TBSS (tract-based segmentation statistics) workflow for DTI/R1 analysis
-
-``fluid_morph.py`` -- 
-Freesurfer cortical-reconstruction-based morphometric analysis.
-
-``fluid_vbm.py`` -- 
-Direct Nipype implementation of FSL VBM protocol.
-
-``fluid_dti.py`` -- 
-VBM Analysis of DTI-based images.
 
 Misc
 ----

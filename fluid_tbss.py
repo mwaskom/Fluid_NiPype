@@ -62,6 +62,7 @@ reggrabber.inputs.template_args = dict(fa_image=[["subject_id", "dwi", "fa.nii"]
                                        radial_diff=[["subject_id", "dwi", "radialdiff.nii"]],
                                        warpfield=[["subject_id", "normalization", "warpfield.nii.gz"]])
 if args.r1:
+    # Add in the R1 (actualy T1 at this stage) image if it was requested
     reggrabber.inputs.field_template = dict(t1_image=pjoin(
         project_dir,"Analysis/Nipype/flash/%s/tissue_parameters/T1.mgz"))
     reggrabber.inputs.template_args["t1_image"] = [["subject_id"]]
@@ -95,12 +96,12 @@ bbregister = pe.Node(fs.BBRegister(init="fsl",
 warp_target =fsl.Info.standard_image("MNI152_T1_1mm.nii.gz")
 
 # Apply the warpfield to the masked FA image using the bbregister affine matrix
-warpfa = pe.Node(fsl.ApplyWarp(interp="sinc",
+warpfa = pe.Node(fsl.ApplyWarp(interp="spline",
                                ref_file=warp_target),
                     name="warpfa")
 
 # And then warp the radialdiff image
-warprdiff = pe.Node(fsl.ApplyWarp(interp="sinc",
+warprdiff = pe.Node(fsl.ApplyWarp(interp="spline",
                                  ref_file=warp_target),
                     name="warprdiff")
                         
@@ -114,7 +115,7 @@ if args.r1:
                                          suffix="_recip"),
                           name="reciprocate")
 
-    warpr1 = pe.Node(fsl.ApplyWarp(interp="sinc",
+    warpr1 = pe.Node(fsl.ApplyWarp(interp="spline",
                                    ref_file=warp_target),
                      name="warpr1")
 
@@ -235,16 +236,16 @@ if args.r1:
                                           use_cingulum_mask=True,
                                           project_data=True),
                         name="projectr1")
-
+                      
 
 # Define a dataink node for the skeleton workflow
 skeletonsink = pe.Node(nio.DataSink(base_directory=pjoin(analysis_dir, "group"),
                                     parameterization=False,
                                     substitutions= [
-     ("fa_brain_warp_merged_mean_skeleton_mask", "skeleton_mask"),
-     ("fa_brain_warp_merged_mean_skeleton", "skeleton"),
-     ("fa_brain_warp_merged_mean", "mean_fa"),
-     ("fa_brain_warp_merged_skeletonised", "skeletonised_fa")]),
+     ("fa_merged_mean_skeleton_mask", "skeleton_mask"),
+     ("fa_merged_mean_skeleton", "skeleton"),
+     ("fa_merged_mean", "mean_fa"),
+     ("fa_merged_skeletonised", "skeletonised_fa")]),
                        name="skeletonsink")
 if args.r1:
     skeletonsink.inputs.substitutions.append(
@@ -272,29 +273,29 @@ def check_subjects(filelist):
 
 # And connect it up
 skeletor.connect([
-    (skelgrabber,   mergefa,       [(("fa_images", check_subjects), "in_files")]),
-    (mergefa,       meanfa,        [("merged_file", "in_file")]),
-    (meanfa,        makeskeleton,  [("out_file", "in_file")]),
-    (makeskeleton,  skeletonmask,  [("skeleton_file", "in_file")]),
-    (skeletonmask,  invertmask,    [("out_file", "in_file2")]),
-    (invertmask,    distancemap,   [("out_file", "in_file")]),
-    (distancemap,   projectfa,     [("distance_map", "distance_map")]),
-    (meanfa,        projectfa,     [("out_file", "in_file")]),
-    (mergefa,       projectfa,     [("merged_file", "data_file")]),
-    (meanfa,        skeletonsink,  [("out_file", "@mean_fa")]),
-    (projectfa,     skeletonsink,  [("projected_data", "@projected_fa")]),
-    (makeskeleton,  skeletonsink,  [("skeleton_file", "@skeleton")]),
-    (skeletonmask,  skeletonsink,  [("out_file", "@skeleton_mask")]),
+    (skelgrabber,     mergefa,         [(("fa_images", check_subjects), "in_files")]),
+    (mergefa,         meanfa,          [("merged_file", "in_file")]),
+    (meanfa,          makeskeleton,    [("out_file", "in_file")]),
+    (makeskeleton,    skeletonmask,    [("skeleton_file", "in_file")]),
+    (skeletonmask,    invertmask,      [("out_file", "in_file2")]),
+    (invertmask,      distancemap,     [("out_file", "in_file")]),
+    (distancemap,     projectfa,       [("distance_map", "distance_map")]),
+    (meanfa,          projectfa,       [("out_file", "in_file")]),
+    (mergefa,         projectfa,       [("merged_file", "data_file")]),
+    (meanfa,          skeletonsink,    [("out_file", "@mean_fa")]),
+    (projectfa,       skeletonsink,    [("projected_data", "@projected_fa")]),
+    (makeskeleton,    skeletonsink,    [("skeleton_file", "@skeleton")]),
+    (skeletonmask,    skeletonsink,    [("out_file", "@skeleton_mask")]),
     ])
 
 if args.r1:
     skeletor.connect([
-        (skelgrabber, merger1,      [(("r1_images", check_subjects), "in_files")]),
-        (merger1,     projectr1,    [("merged_file", "alt_data_file")]),
-        (meanfa,      projectr1,    [("out_file", "in_file")]),
-        (mergefa,     projectr1,    [("merged_file", "data_file")]),
-        (distancemap, projectr1,    [("distance_map", "distance_map")]),
-        (projectr1,   skeletonsink, [("projected_data", "@projected_r1")]),
+        (skelgrabber,     merger1,         [(("r1_images", check_subjects), "in_files")]),
+        (merger1,         projectr1,       [("merged_file", "alt_data_file")]),
+        (meanfa,          projectr1,       [("out_file", "in_file")]),
+        (mergefa,         projectr1,       [("merged_file", "data_file")]),
+        (distancemap,     projectr1,       [("distance_map", "distance_map")]),
+        (projectr1,       skeletonsink,    [("projected_data", "@projected_r1")]),
         ])
 
 def workflow_runner(flow, stem):
