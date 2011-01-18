@@ -64,6 +64,9 @@ Enhanced TBSS (tract-based segmentation statistics) workflow for DTI/R1 analysis
 ``fluid_morph.py`` -- 
 Freesurfer cortical-reconstruction-based morphometric analysis.
 
+``fluid_vbm.py`` -- 
+Direct Nipype implementation of FSL VBM protocol.
+
 ``fluid_dti.py`` -- 
 VBM Analysis of DTI-based images.
 
