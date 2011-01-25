@@ -376,9 +376,6 @@ if args.pype:
             os.remove(lf)
     fulllog.close()
     
-    # Write the pipeline graph
-    unpack.write_graph(graph2use="flat")
-
 
 # Softlink heuristically 
 # ----------------------

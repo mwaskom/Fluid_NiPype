@@ -89,5 +89,3 @@ Note
 ----
 
 The code contained in this repository is subject to change at any time.
-(Although I would like to think that the processing and registration workflows 
-are pretty stable).

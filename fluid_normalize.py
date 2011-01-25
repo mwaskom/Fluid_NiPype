@@ -63,12 +63,26 @@ os.chdir(regdir)
 logfile = open("normalization.log","w")
 
 def log(interface, result=None):
+    """Write a cmdline and result info to logfile/optionally to screen"""
     msg = "\n".join([interface.cmdline,
                      result.runtime.stdout,
                      result.runtime.stderr, "\n"])
     if v:
         print msg
     logfile.write(msg)
+
+def runcmd(cmd):
+    """Run a command using subprocess."""
+    cmdline = " ".join(cmd)
+    logfile.write(cmdline + "\n")
+    proc = subprocess.Popen(cmdline,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            env=os.environ,
+                            shell=True)
+    res = proc.communicate()
+    if v:
+        print cmdline, res[0],res[1]
 
 try:
     # Norm to nifti
@@ -126,7 +140,7 @@ try:
     warpbrain = fsl.ApplyWarp(in_file    = brain,
                               field_file = fnirtfield,
                               ref_file   = target_brain,
-                              interp     = "sinc",
+                              interp     = "spline",
                               out_file   = brain_fnirted)
     if force or not os.path.exists(brain_fnirted):
         res = warpbrain.run()
@@ -150,54 +164,21 @@ try:
                    "-%s"%options[i][0],
                    options[i][1],
                    shot]
-            cmdline = " ".join(cmd)
-            logfile.write(cmdline + "\n")
-            proc = subprocess.Popen(cmdline,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    env=os.environ,
-                                    shell=True)
-            res = proc.communicate()
-            if v:
-                print cmdline, res[0],res[1]
+            runcmd(cmd)
         for i in range(3):
             cmd = ["pngappend"]
             cmd.append(" + ".join([s for s in shots if s.startswith(planes[i])]))
             rowimg = "row-%d.png"%i
             cmd.append(rowimg)
             shots.append(rowimg)
-            cmdline = " ".join(cmd)
-            logfile.write(cmdline + "\n")
-            proc = subprocess.Popen(cmdline,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    env=os.environ,
-                                    shell=True)
-            res = proc.communicate()                                    
-            if v:
-                print cmdline, res[0],res[1]
+            runcmd(cmd)
         cmd = ["pngappend"]
         cmd.append(" - ".join(["row-%d.png"%i for i in range(3)]))
         cmd.append(qcpng)
-        cmdline = " ".join(cmd)
-        logfile.write(cmdline + "\n")
-        proc = subprocess.Popen(cmdline,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                env=os.environ,
-                                shell=True)
-        res = proc.communicate()
-        if v:
-            print cmdline, res[0],res[1]
+        runcmd(cmd)
         for shot in shots:
             os.remove(os.path.join(regdir, shot))
 
-except:
-    # Deal with exceptions
+finally:
     logfile.close()
     os.chdir(origdir)
-    raise
-
-# Clean up
-logfile.close()
-os.chdir(origdir)
