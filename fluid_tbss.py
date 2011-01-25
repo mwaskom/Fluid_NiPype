@@ -90,8 +90,7 @@ maskrdiff = pe.Node(fsl.ImageMaths(op_string="-mas", suffix="_brain"),
 bbregister = pe.Node(fs.BBRegister(init="fsl",
                                    contrast_type="t2",
                                    epi_mask=True,
-                                   out_fsl_file=True,
-                                   args="--tol1d 1e-3"), #taken from dt_recon commandline
+                                   out_fsl_file=True),
                      name="bbregister")
 
 # Get a reference to the warp target (upsampled MNI brain)
@@ -210,8 +209,6 @@ skeletonmask = pe.Node(fsl.ImageMaths(op_string="-thr %.1f -bin"%skeleton_thresh
 brainmask = fsl.Info.standard_image("MNI152_T1_1mm_brain_mask.nii.gz")
 
 # Invert the brainmask then add in the tract skeleton
-# (I'm not exactly sure why, but this is what happens in the
-# TBSS scripts so I don't want to mess with that)
 invertmask = pe.Node(fsl.ImageMaths(in_file=brainmask,
                                     suffix="_inv",
                                     op_string="-mul -1 -add 1 -add"),
