@@ -553,7 +553,7 @@ for subj in subjects:
 
 # Preprocess Fieldmaps
 # --------------------
-protocols = dict(full="func dti rest",func="func",struc="dti rest")
+protocols = dict(full="func dti rest",func="func",struct="dti rest")
 if args.fieldmaps:
     cmd = "/mindhive/gablab/fluid/Nipype_Code/prepare_fieldmaps.py "
     cmd += " -s "

@@ -115,7 +115,6 @@ try:
                       config_file     = fnirt_cfg,
                       affine_file     = flirtmat,
                       refmask_file    = target_mask,
-                      apply_refmask   = [0,0,0,0,1,1],
                       fieldcoeff_file = fnirtfield)
     if force or (not os.path.exists(t1_fnirted) or not os.path.exists(fnirtfield)):
         res = fnirt.run()
@@ -131,7 +130,7 @@ try:
     warpt1 = fsl.ApplyWarp(in_file    = t1,
                            field_file = fnirtfield,
                            ref_file   = target_brain,
-                           interp     = "sinc",
+                           interp     = "spline",
                            out_file   = t1_fnirted)
     if force or not os.path.exists(t1_fnirted):
         res = warpt1.run()
