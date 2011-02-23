@@ -6,7 +6,6 @@ import os
 import sys
 import argparse
 import inspect
-from warnings import warn
 from copy import deepcopy
 
 import nipype.pipeline.engine as pe
@@ -15,7 +14,7 @@ import nipype.interfaces.fsl as fsl
 import nipype.interfaces.utility as util
 from nipype.interfaces.base import Bunch
 
-from workflows.preproc import preproc
+from workflows import preproc
 from workflows.registration import registration
 from workflows.fsl_model import volume_model
 from workflows.surface_projection import surfproj
@@ -49,7 +48,7 @@ default_paradigm = "iq"
 # Dynamically import the experiment file
 if args.paradigm is None:
     args.paradigm = default_paradigm
-# Look for paradgim_experiment.py in an experiments package
+# Look for paradgim.py in an experiments package
 try:   
     exp = __import__("experiments." + args.paradigm,
                      fromlist=["experiments"])
@@ -96,30 +95,24 @@ subjectsource = pe.Node(util.IdentityInterface(fields=["subject_id"]),
 # -------------
 
 # Get preproc input and output
+preproc = preproc.get_workflow(name="preproc", b0_unwarp=False)
 preproc_input = preproc.get_node("inputspec")
 preproc_output = preproc.get_node("outputspec")
-preproc_report = preproc.get_node("report")
 
 # Preproc datasource node
 preprocsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
-                                        outfields=["timeseries",
-                                                   "voxel_shift_map",
-                                                   "fieldmap_brain"],
+                                        outfields=["timeseries"],
                                         base_directory=data_dir,
                                         template=exp.source_template,
                                         sort_filelist=True,
                                         ),
                         name="preprocsource")
+
 preprocsource.inputs.template_args = exp.template_args
-preprocsource.inputs.template_args["voxel_shift_map"] = [["subject_id", "fieldmaps", "func_voxel_shift_map"]]
-preprocsource.inputs.template_args["fieldmap_brain"] = [["subject_id", "fieldmaps", "func_warped_mag"]]
 
 # Preproc Datasink nodes
 preprocsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
                       name="preprocsink")
-
-preprocreport = pe.Node(nio.DataSink(base_directory=report_dir),
-                        name="preprocreport")
 
 # Preproc filename substitutions
 preprocsinksub = pe.Node(util.Merge(len(preproc_output.outputs.__dict__)),
@@ -127,43 +120,32 @@ preprocsinksub = pe.Node(util.Merge(len(preproc_output.outputs.__dict__)),
 
 flutil.get_output_substitutions(preproc, preproc_output, preprocsinksub)
 
-preprocreportsub = pe.Node(util.Merge(len(preproc_report.outputs.__dict__)),
-                              name="preprocreportsub")
-
-flutil.get_output_substitutions(preproc, preproc_report, preprocreportsub)
-
 # Preproc node substitutions
 # NOTE: It would be nice if this were more intuitive, but I haven't
 # figured out a good way.  Have to hardcode the node names for now.
-preproc_mapnodes = ["art", "dilatemask", "highpass", "masksmoothfunc", 
-                    "extractref", "meanfunc2", "realign"]
-preprocsinknodesubs = flutil.get_mapnode_substitutions(exp.nruns, preproc_mapnodes)
-
-preproc_report_mapnodes = ["art","plotmean","realign"]
+preproc_mapnodes = ["art", "dilatemask", "highpass", "masksmoothfunc", "extractref",
+                    "meanfunc3", "realign", "plotmean", "func2anat", "func2anatpng"]
 for plot in ["displacement", "rotation", "translation"]:
-    preproc_report_mapnodes.append("plot%s"%plot)
+    preproc_mapnodes.append("plot%s"%plot)
 for img in ["example", "mean"]:
-    preproc_report_mapnodes.append("%sslice"%img)
-preprocreportnodesubs = flutil.get_mapnode_substitutions(exp.nruns, preproc_report_mapnodes)
+    preproc_mapnodes.append("%sslice"%img)
+preprocsinknodesubs = flutil.get_mapnode_substitutions(exp.nruns, preproc_mapnodes)
 
 
 flutil.set_substitutions(preproc, preprocsink, preprocsinksub, preprocsinknodesubs)
 
-flutil.set_substitutions(preproc, preprocreport, preprocreportsub, preprocreportnodesubs)
-
 # Preproc connections
 preproc.connect(subjectsource, "subject_id", preprocsource, "subject_id")
+preproc.connect(subjectsource, "subject_id", preproc_input, "subject_id")
 
 # Input connections
 flutil.connect_inputs(preproc, preprocsource, preproc_input)
 
 # Set up the subject containers
 flutil.subject_container(preproc, subjectsource, preprocsink)
-flutil.subject_container(preproc, subjectsource, preprocreport)
 
 # Connect the heuristic outputs to the datainks
 flutil.sink_outputs(preproc, preproc_output, preprocsink, "preproc")
-flutil.sink_outputs(preproc, preproc_report, preprocreport, "preproc")
 
 # Set up the working output
 preproc.base_dir = working_dir
@@ -214,10 +196,6 @@ registration.connect([
     (subjectsource, regsource, [("subject_id", "subject_id")]),
     (subjectsource, reg_input, [("subject_id", "subject_id")]),
     ])
-
-# Assign a smoothing value for the registration workflow
-reg_input.inputs.smooth_fwhm = 0.
-warn("\nWARNING:\n\nYou haven't decided on a surface smoothing kernel yet")
 
 # Registration filename substitutions
 regsinksub = pe.Node(util.Merge(len(reg_output.outputs.__dict__)),
@@ -610,22 +588,22 @@ flutil.archive_crashdumps(fixed_fx)
 
 if __file__.endswith("fluid_fmri.py"):
     report_script = "python /mindhive/gablab/fluid/Nipype_Code/reporting/build_report.py "
-    print "Building report"
 else:
     report_script = "python /dev/null "
 def report():
+    print "Building report"
     os.system(report_script + " ".join(subject_list))
         
+def workflow_runner(wf, stem):
+    if any([arg for arg in args.workflows if arg.startswith(stem)]) or "all" in args.workflows:
+        wf.run(inseries=args.inseries)
+        report()
 
 if __name__ == "__main__":
     if args.run:
-        if "preproc" in args.workflows:
-            preproc.run(inseries=args.inseries)
-            report()
+        workflow_runner(preproc, "preproc")
         
-        if "reg" in args.workflows:
-            registration.run(inseries=args.inseries)
-            report()
+        workflow_runner(registration, "reg")
         
         if "model" in args.workflows:
             model.run(inseries=args.inseries)
