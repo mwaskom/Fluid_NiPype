@@ -34,7 +34,7 @@ def substitute(origpath, subname):
         # .mincost is a dumb extension
         elif ext.endswith(".mincost"):
             ext = ".dat"
-        substitutes.append((os.path.basename(path), subname + ext))
+        substitutes.append((os.path.basename(path), "".join([subname,ext])))
     return substitutes
 
 def get_output_substitutions(workflow, outputnode, mergenode):
