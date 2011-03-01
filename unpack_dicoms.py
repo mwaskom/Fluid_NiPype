@@ -364,19 +364,6 @@ unpack.config = dict(crashdump_dir=crashdir)
 if args.pype:
     unpack.run(inseries=args.inseries)
 
-    # Log archiving
-    logdir = "/mindhive/gablab/fluid/Nipype_Code/log_archive/%s"%datestamp
-    if not os.path.isdir(logdir):
-        os.mkdir(logdir)
-    timestamp = str(datetime.now())[11:16].replace(":","-")
-    fulllog = open("%s/unpack_%s.log"%(logdir,timestamp),"w")
-    for lf in ["pypeline.log%s"%n for n in [".4",".3",".2",".1",""]]:
-        if os.path.isfile(lf):
-            fulllog.write(open(lf).read())
-            os.remove(lf)
-    fulllog.close()
-    
-
 # Softlink heuristically 
 # ----------------------
 
