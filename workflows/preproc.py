@@ -1,6 +1,6 @@
 """
-Contains an FSL/Freesurfer preprocessing workflow. See the docstring for get_workflow()
-for more information.
+Contains an FSL/Freesurfer preprocessing workflow. 
+See the docstring for get_workflow() for more information.
 
 """
 import nibabel as nib
@@ -13,7 +13,7 @@ import nipype.algorithms.rapidart as ra
 from warnings import warn
 
 
-def get_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
+def get_preproc_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
     """Return a preprocessing workflow.
 
     The workflow primarily uses FSL, and mostly replicates FEAT preprocessing. By default,
@@ -51,6 +51,7 @@ def get_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
 
     If anatomical registration is performed, the following are added:
         - Tkregister-style affine matrix
+        - FSL-style affine matrix
         - Sliced png summarizing the functional to anatomical transform
         - Optimization cost file quantitatively summarizing the transformation
     """
@@ -70,20 +71,18 @@ def get_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
         input_fields.extend(["voxel_shift_map",
                              "fieldmap_brain"])
 
-    inputnode = pe.Node(interface=util.IdentityInterface(fields=input_fields),
+    inputnode = pe.Node(util.IdentityInterface(fields=input_fields),
                         name="inputspec")
 
     # Convert functional images to float representation
-    img2float = pe.MapNode(interface=fsl.ImageMaths(out_data_type="float",
-                                                 op_string = "",
-                                                 suffix="_flt"),
+    img2float = pe.MapNode(fsl.ChangeDataType(output_datatype="float"),
                            iterfield=["in_file"],
                            name="img2float")
 
     # Get the middle volume of each run for motion correction 
-    extractref = pe.MapNode(interface=fsl.ExtractROI(t_size=1),
-                             iterfield=["in_file"],
-                             name = "extractref")
+    extractref = pe.MapNode(fsl.ExtractROI(t_size=1),
+                            iterfield=["in_file", "t_min"],
+                            name = "extractref")
 
     # Slice the example func for reporting
     exampleslice = pe.MapNode(fsl.Slicer(image_width = 572,
@@ -93,57 +92,53 @@ def get_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
     exampleslice.inputs.sample_axial=2
 
     # Motion correct to middle volume of each run
-    realign =  pe.MapNode(interface=fsl.MCFLIRT(stages=4,
-                            interpolation="sinc",
-                            save_mats = True,
-                                                save_plots = True,
-                                                save_rms = True),
+    realign =  pe.MapNode(fsl.MCFLIRT(stages=4,
+                                      interpolation="sinc",
+                                      save_mats = True,
+                                      save_plots = True,
+                                      save_rms = True),
                           name="realign",
                           iterfield = ["in_file", "ref_file"])
 
     # Plot the rotations, translations, and displacement parameters from MCFLIRT
-    plotrot = pe.MapNode(interface=fsl.PlotMotionParams(in_source="fsl",
-                                                        plot_type="rotations"),
+    plotrot = pe.MapNode(fsl.PlotMotionParams(in_source="fsl",
+                                              plot_type="rotations"),
                          name="plotrotation", 
                          iterfield=["in_file"])
 
-    plottrans = pe.MapNode(interface=fsl.PlotMotionParams(in_source="fsl",
-                                                        plot_type="translations"),
+    plottrans = pe.MapNode(fsl.PlotMotionParams(in_source="fsl",
+                                                plot_type="translations"),
                            name="plottranslation", 
                            iterfield=["in_file"])
 
-    plotdisp = pe.MapNode(interface=fsl.PlotMotionParams(in_source="fsl",
-                                                         plot_type="displacement"),
+    plotdisp = pe.MapNode(fsl.PlotMotionParams(in_source="fsl",
+                                               plot_type="displacement"),
                           name="plotdisplacement",
                           iterfield=["in_file"])
 
     # Get a mean image of the realigned timeseries
-    meanfunc1 = pe.MapNode(interface=fsl.ImageMaths(op_string = "-Tmean",
-                                                   suffix="_mean"),
+    meanfunc1 = pe.MapNode(fsl.MeanImage(),
                            iterfield=["in_file"],
                            name="meanfunc1")
 
     # Skullstrip the mean functional image
-    stripmean = pe.MapNode(interface=fsl.BET(mask = True,
-                                             no_output=True,
-                                             frac = 0.3),
+    stripmean = pe.MapNode(fsl.BET(mask = True,
+                                   no_output=True,
+                                   frac = 0.3),
                            iterfield = ["in_file"],
                            name = "stripmean")
 
     # Use the mask from skullstripping to strip each timeseries
-    maskfunc1 = pe.MapNode(interface=fsl.ImageMaths(suffix="_bet",
-                                                    op_string="-mas"),
-                           iterfield=["in_file", "in_file2"],
+    maskfunc1 = pe.MapNode(fsl.ApplyMask(),
+                           iterfield=["in_file", "mask_file"],
                            name = "maskfunc1")
 
     # Define function for the first set of connections
     def getmiddlevolume(func):
         """Return the middle volume index."""
-        funcfile = func
-        if isinstance(func, list):
-            funcfile = func[0]
-        _,_,_,timepoints = nib.load(funcfile).get_shape()
-        return (timepoints/2)-1
+        if not isinstance(func, list):
+            func = [func]
+        return [(nib.load(f).get_shape()[3]/2)-1 for f in func]
 
     # Connect the nodes for the first stage of preprocessing
     preproc.connect([
@@ -159,15 +154,16 @@ def get_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
         (realign,    meanfunc1,     [("out_file", "in_file")]),
         (meanfunc1,  stripmean,     [("out_file", "in_file")]),
         (realign,    maskfunc1,     [("out_file", "in_file")]),
-        (stripmean,  maskfunc1,     [("mask_file", "in_file2")]),
+        (stripmean,  maskfunc1,     [("mask_file", "mask_file")]),
         ])
 
+    # Optional B0 Inhomogeneity Unwarping
+    # -----------------------------------
     if b0_unwarp:
 
         # Use the mask to strip the example func
-        maskexample = pe.MapNode(fsl.ImageMaths(suffix="_bet",
-                                                op_string="-mas"),
-                                 iterfield=["in_file", "in_file2"],
+        maskexample = pe.MapNode(fsl.ApplyMask(),
+                                 iterfield=["in_file", "mask_file"],
                                  name = "maskexample")
 
         # Register the fieldmap magnitude volume to the example func
@@ -178,12 +174,12 @@ def get_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
                                            searchr_z=[-20, 20],
                                            dof=6,
                                            interp="trilinear"),
-                                  iterfield=["reference"],
-                                  name="regfieldmap")
+                                 iterfield=["reference"],
+                                 name="regfieldmap")
 
         # Resample the voxel-shift map to match the timeseries
-        resampvsm = pe.MapNode(interface=fsl.ApplyXfm(apply_xfm=True,
-                                                      interp="trilinear"),
+        resampvsm = pe.MapNode(fsl.ApplyXfm(apply_xfm=True,
+                                            interp="trilinear"),
                                iterfield=["reference", "in_matrix_file"],
                                name="resamplevsm")
 
@@ -194,14 +190,14 @@ def get_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
 
         # Dewarp the timeseries
         dewarpts = pe.MapNode(fsl.FUGUE(),
-                                  iterfield=["in_file", "shift_in_file", "mask_file"],
-                                  name="dewarptimeseries")
+                              iterfield=["in_file", "shift_in_file", "mask_file"],
+                              name="dewarptimeseries")
 
 
         # Connect up the dewarping stages
         preproc.connect([
-            (extractref, maskexample,   [("roi_file", "in_file")]),
-            (stripmean,  maskexample,   [("mask_file", "in_file2")]),
+            (extractref,   maskexample,  [("roi_file", "in_file")]),
+            (stripmean,    maskexample,  [("mask_file", "mask_file")]),
             (inputnode,    regfieldmap,  [("fieldmap_brain", "in_file")]),
             (maskexample,  regfieldmap,  [("out_file", "reference")]),
             (regfieldmap,  resampvsm,    [("out_matrix_file", "in_matrix_file")]),
@@ -216,37 +212,34 @@ def get_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
             ])
 
     # Determine the 2nd and 98th percentile intensities of each run
-    getthresh = pe.MapNode(interface=fsl.ImageStats(op_string="-p 2 -p 98"),
+    getthresh = pe.MapNode(fsl.ImageStats(op_string="-p 2 -p 98"),
                            iterfield = ["in_file"],
                            name="getthreshold")
 
     # Threshold the first fun of the functional data at 10% of the 98th percentile
-    threshold = pe.MapNode(interface=fsl.ImageMaths(out_data_type="char",
-                                                    suffix="_thresh"),
+    threshold = pe.MapNode(fsl.ImageMaths(out_data_type="char",
+                                          suffix="_thresh"),
                            iterfield = ["in_file"],
                            name="threshold")
 
 
     # Determine the median value of the functional runs using the mask
-    medianval = pe.MapNode(interface=fsl.ImageStats(op_string="-k %s -p 50"),
+    medianval = pe.MapNode(fsl.ImageStats(op_string="-k %s -p 50"),
                            iterfield = ["in_file", "mask_file"],
                            name="medianval")
 
     # Dilate the mask
-    dilatemask = pe.MapNode(interface=fsl.ImageMaths(suffix="_dil",
-                                                     op_string="-dilF"),
+    dilatemask = pe.MapNode(fsl.DilateImage(operation="max"),
                             iterfield=["in_file"],
                             name="dilatemask")
 
     # Mask the runs again with this new mask
-    maskfunc2 = pe.MapNode(interface=fsl.ImageMaths(suffix="_mask",
-                                                    op_string="-mas"),
-                          iterfield=["in_file", "in_file2"],
-                          name="maskfunc2")
+    maskfunc2 = pe.MapNode(fsl.ApplyMask(),
+                           iterfield=["in_file", "mask_file"],
+                           name="maskfunc2")
 
     # Get a new mean image from each functional run
-    meanfunc2 = pe.MapNode(interface=fsl.ImageMaths(op_string="-Tmean",
-                                                    suffix="_mean"),
+    meanfunc2 = pe.MapNode(fsl.MeanImage(),
                            iterfield=["in_file"],
                            name="meanfunc2")
 
@@ -264,17 +257,17 @@ def get_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
         (threshold,  medianval,  [("out_file", "mask_file")]),
         (threshold,  dilatemask, [("out_file", "in_file")]),
         (realign,    maskfunc2,  [("out_file", "in_file")]),
-        (dilatemask, maskfunc2,  [("out_file", "in_file2")]),
+        (dilatemask, maskfunc2,  [("out_file", "mask_file")]),
         (maskfunc2,  meanfunc2,  [("out_file", "in_file")]),
         ])
 
     # Use RapidART to detect motion/intensity outliers
-    art = pe.MapNode(interface=ra.ArtifactDetect(use_differences = [True, False],
-                                                 use_norm = True,
-                                                 zintensity_threshold = 3,
-                                                 norm_threshold = 1,
-                                                 parameter_source = "FSL",
-                                                 mask_type = "file"),
+    art = pe.MapNode(ra.ArtifactDetect(use_differences = [True, False],
+                                       use_norm = True,
+                                       zintensity_threshold = 3,
+                                       norm_threshold = 1,
+                                       parameter_source = "FSL",
+                                       mask_type = "file"),
                      iterfield=["realignment_parameters","realigned_files","mask_file"],
                      name="art")
 
@@ -291,19 +284,17 @@ def get_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
         ])
 
     # Scale the median value each voxel in the run to 10000
-    medianscale = pe.MapNode(interface=fsl.ImageMaths(suffix="_gms"),
-                             iterfield=["in_file","op_string"],
+    medianscale = pe.MapNode(fsl.BinaryMaths(operation="mul"),
+                             iterfield=["in_file","operand_value"],
                              name="medianscale")
 
     # High-pass filter the timeseries
-    highpass = pe.MapNode(interface=fsl.ImageMaths(suffix="_hpf",
-                                                   op_string="-bptf 64 -1"),
+    highpass = pe.MapNode(fsl.TemporalFilter(),
                           iterfield=["in_file"],
                           name="highpass")
 
     # Get a new mean image from each functional run
-    meanfunc3 = pe.MapNode(interface=fsl.ImageMaths(op_string="-Tmean",
-                                                    suffix="_mean"),
+    meanfunc3 = pe.MapNode(fsl.MeanImage(),
                            iterfield=["in_file"],
                            name="meanfunc3")
 
@@ -315,7 +306,7 @@ def get_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
     meanslice.inputs.sample_axial = 2
 
     # Get the median value of the filtered timeseries
-    medianval2 = pe.MapNode(interface=fsl.ImageStats(op_string="-k %s -p 50"),
+    medianval2 = pe.MapNode(fsl.ImageStats(op_string="-k %s -p 50"),
                             iterfield = ["in_file", "mask_file"],
                             name="medianval2")
 
@@ -332,8 +323,8 @@ def get_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
     # Make connections to the intensity normalization and temporal filtering
     preproc.connect([
         (maskfunc2,   medianscale,  [("out_file", "in_file")]),
-        (medianval,   medianscale,  [(("out_stat", getmedianscaleop), "op_string")]),
-        (inputnode,   highpass,     [(("hpf_cutoff", gethpfop), "op_string")]),
+        (medianval,   medianscale,  [(("out_stat", lambda x: [10000./i for i in x]), "operand_value")]),
+        (inputnode,   highpass,     [(("hpf_cutoff", lambda x: x/2), "highpass_sigma")]),
         (medianscale, highpass,     [("out_file", "in_file")]),
         (highpass,    meanfunc3,    [("out_file", "in_file")]),
         (meanfunc3,   meanslice,    [("out_file", "in_file")]),
@@ -342,18 +333,17 @@ def get_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
         ])
 
     # Merge the median values with the mean functional images into a coupled list
-    mergenode = pe.Node(interface=util.Merge(2, axis="hstack"),
+    mergenode = pe.Node(util.Merge(2, axis="hstack"),
                         name="merge")
 
     # Smooth in the volume with SUSAN
-    smooth = pe.MapNode(interface=fsl.SUSAN(),
+    smooth = pe.MapNode(fsl.SUSAN(),
                         iterfield=["in_file", "brightness_threshold", "usans"],
                         name="smooth")
 
     # Mask the smoothed data with the dilated mask
-    masksmoothfunc = pe.MapNode(interface=fsl.ImageMaths(suffix="_mask",
-                                                         op_string="-mas"),
-                                iterfield=["in_file","in_file2"],
+    masksmoothfunc = pe.MapNode(fsl.ApplyMask(),
+                                iterfield=["in_file","mask_file"],
                                 name="masksmoothfunc")
     # SUSAN functions
     def getbtthresh(medianvals):
@@ -373,9 +363,11 @@ def get_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
         (medianval2, smooth,         [(("out_stat", getbtthresh), "brightness_threshold")]),
         (mergenode,  smooth,         [(("out", getusans), "usans")]),
         (smooth,     masksmoothfunc, [("smoothed_file", "in_file")]),
-        (dilatemask, masksmoothfunc, [("out_file", "in_file2")]),
+        (dilatemask, masksmoothfunc, [("out_file", "mask_file")]),
         ])
 
+    # Optional Anatomical Coregistration
+    # ----------------------------------
     if anat_reg:
         
         # Estimate the registration to Freesurfer conformed space
@@ -439,10 +431,11 @@ def get_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
                      "translation_plot",
                      "displacement_plot"]
     if anat_reg:
-        output_fields.extend(["func2anat_flirt",
+        output_fields.extend(["func2anat_cost",
+                              "func2anat_flirt",
                               "func2anat_tkreg",
                               "func2anat_slices",
-                              "func2anat_cost"])
+                              ])
 
     outputnode = pe.Node(util.IdentityInterface(fields=output_fields),
                          name="outputspec")
@@ -473,4 +466,4 @@ def get_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
             (func2anat,    outputnode, [("out_fsl_file", "func2anat_flirt")]),
             ])
 
-    return preproc
+    return preproc, inputnode, outputnode

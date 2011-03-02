@@ -498,7 +498,7 @@ for subj in subjects:
     if args.norm and os.path.exists(os.path.join(datadir, subj, "mri/orig/001.mgz")):
         # Fluid_register command line
         sgescript.append(
-            "python /mindhive/gablab/fluid/Nipype_Code/fluid_normalize.py %s"%subj)
+            "python /mindhive/gablab/fluid/Nipype_Code/fluid_normalize.py -s %s -inseries"%subj)
         print "Adding %s normalization to SGE script"%subj
         
     # Actually submit to Sun Grid Engine

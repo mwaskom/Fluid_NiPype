@@ -38,6 +38,7 @@ target_brain = fsl.Info.standard_image("avg152T1_brain.nii.gz")
 target_head =  fsl.Info.standard_image("avg152T1.nii.gz")
 target_mask = fsl.Info.standard_image("MNI152_T1_2mm_brain_mask_dil.nii.gz")
 fnirt_cfg = os.path.join(os.environ["FSLDIR"], "etc/flirtsch/T1_2_MNI152_2mm.cnf")
+mni_orient = ("RL", "PA", "IS")
 
 # Define a CheckReg interface here for now (will likely migrate to Nipype source)
 # -------------------------------------------------------------------------------
@@ -94,10 +95,10 @@ cvthead = pe.Node(fs.MRIConvert(out_type="niigz", out_datatype="float"),
                   name="converthead")
 
 # Swap image dimensions to MNI orientation
-swapbrain = pe.Node(fsl.SwapDimensions(new_dims=("RL","PA","IS")),
+swapbrain = pe.Node(fsl.SwapDimensions(new_dims=mni_orient),
                     name="swapbrain")
 
-swaphead = pe.Node(fsl.SwapDimensions(new_dims=("RL","PA","IS")),
+swaphead = pe.Node(fsl.SwapDimensions(new_dims=mni_orient),
                    name="swaphead")
 
 # FLIRT brain to MNI152_brain
