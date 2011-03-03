@@ -4,9 +4,15 @@ import nipype.interfaces.freesurfer as fs
 import nipype.interfaces.utility as util
 
 
-def get_registration_workflow(name="registration", volume=True, surface=True, surface_smooth=True):
+def get_registration_workflow(name="registration", 
+                              volume=True,
+                              surface=True,
+                              surface_smooth=True):
 
     registration = pe.Workflow(name=name)
+
+    if not surface:
+        surface_smooth = False
 
     # Define the inputs for the registation workflow
     infields = []
@@ -91,15 +97,11 @@ def get_registration_workflow(name="registration", volume=True, surface=True, su
         outfields.append("warped_image")
     if surface:
         outfields.extend(["hemi_image", "hemi_image_fsaverage", "hemi"])
-    outputnode = pe.Node(util.IdentityInterface(fields=["warped_timeseries",
-                                                        "warped_example_func",
-                                                        "warped_functional_mask",
-                                                        "warped_mean_func",
-                                                        "hemi_timeseries",
-                                                        "hemi_timeseries_fsaverage",
-                                                        "register",
-                                                        "hemi"]),
+    outputnode = pe.Node(util.IdentityInterface(fields=["warped_image"]),
                          name="outputspec")
 
+    registration.connect([
+        (applywarp, outputnode, [("out_file", "warped_image")]),
+        ])
     
-    return registration
+    return registration, inputnode, outputnode

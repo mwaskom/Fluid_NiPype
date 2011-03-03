@@ -6,6 +6,7 @@ import os
 import argparse
 import inspect
 from copy import deepcopy
+from os.path import join as pjoin
 
 import nipype.pipeline.engine as pe
 import nipype.interfaces.io as nio
@@ -15,9 +16,7 @@ from nipype.interfaces.base import Bunch
 from workflows.preproc import get_preproc_workflow
 from workflows.fsl_model import get_model_workflow
 from workflows.registration import get_registration_workflow
-from workflows.surface_projection import surfproj
-from workflows.fixed_fx_vol import fixed_fx as fixed_fx_volume
-from workflows.fixed_fx_surf import fixed_fx as fixed_fx_surface
+from workflows.fixed_fx import get_fixedfx_workflow
 
 import fluid_utility as flutil
 
@@ -227,8 +226,12 @@ def subjectinfo(info, exp):
     return output
 
 
+
+# Map space to smoothing
+spacedict = dict(volume="smoothed", surface="unsmoothed")
+
 # Get model input and output
-model, model_input, model_output = get_model_workflow(name="%s_model"%args.space)
+model, model_input, model_output = get_model_workflow(name="%s_model"%spacedict[args.space])
 
 # Set up the date sources for each space
 modelsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
@@ -240,10 +243,7 @@ modelsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
                                       sort_filelist=True),
                       name="modelsource")
 
-modelsource.inputs.template = os.path.join(
-    "Analysis/Nipype",args.paradigm ,"%s/%s/run_?/%s")
-
-spacedict = dict(volume="smoothed", surface="unsmoothed")
+modelsource.inputs.template = os.path.join(analysis_dir, "%s/%s/run_?/%s")
 
 modelsource.inputs.template_args = dict(
     outlier_files=[["subject_id", "preproc", "outlier_files.txt"]],
@@ -268,7 +268,7 @@ model_mapnodes = ["featmodel", "sliceresidual", "modelestimate", "slicestats"]
 
 modelsinksubs = flutil.get_mapnode_substitutions(exp.nruns, model_mapnodes)
 
-modelsinksubs.append(("_contrast_","stats/"))
+modelsinksubs.append(("_contrast_","images/"))
 
 flutil.set_substitutions(model, modelsink, modelsub, modelsinksubs)
 
@@ -300,13 +300,13 @@ model.connect([
     ])
 
 # Connect inputs
-flutil.connect_inputs(model, modelsource, model_input, makelist=["overlay_background"], listlength=exp.nruns)
+flutil.connect_inputs(model, modelsource, model_input)
 
 # Set up the subject containers
 flutil.subject_container(model, subjectsource, modelsink)
 
 # Connect the heuristic outputs to the datainks
-flutil.sink_outputs(model, model_output, modelsink, "model.%s"%args.space)
+flutil.sink_outputs(model, model_output, modelsink, "model.%s"%spacedict[args.space])
 
 # Set the other model inputs
 model_input.inputs.TR = exp.TR
@@ -326,241 +326,138 @@ flutil.archive_crashdumps(model)
 # ============
 
 # Get registration input and output
-if 0:
-    registration, reg_input, reg_output = get_registration_workflow()
+registration, reg_input, reg_output = get_registration_workflow(surface=False)
 
-    # Registration datasource node
-    regsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
-                                        outfields=["warpfield", "mean_func",
-                                                   "functional_mask", "example_func",
-                                                   "vol_timeseries", "surf_timeseries"],
-                                        base_directory = project_dir,
-                                        sort_filelist=True),
-                        name="regsource")
+imagesource = pe.Node(util.IdentityInterface(fields=["image"]),
+                      iterables=("image", ["cope", "varcope"]),
+                      name="imagesource")
 
-    regsource.inputs.template = "Analysis/Nipype/" + args.paradigm + "/%s/preproc/run_?/%s.nii.gz"
-    regsource.inputs.field_template = dict(warpfield="Data/%s/normalization/%s.nii.gz")
-    regsource.inputs.template_args = dict(mean_func=[["subject_id", "mean_func"]],
-                                          example_func=[["subject_id", "example_func"]],
-                                          functional_mask=[["subject_id", "functional_mask"]],
-                                          vol_timeseries=[["subject_id", "smoothed_timeseries"]],
-                                          surf_timeseries=[["subject_id", "unsmoothed_timeseries"]],
-                                          warpfield=[["subject_id","warpfield"]])
+# Registration datasource node
+regsource = pe.Node(nio.DataGrabber(infields=["subject_id",
+                                              "contrast",
+                                              "image"],
+                                    outfields=["warpfield",
+                                               "fsl_affine",
+                                               "source_images"],
+                                    base_directory=analysis_dir,
+                                    sort_filelist=True),
+                    name="regsource")
 
-    # Registration Datasink nodes
-    regsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
-                      name="regsink")
-
-    regreport = pe.Node(nio.DataSink(base_directory=report_dir),
-                        name="regreport")
-
-    # Registration connections
-    registration.connect([
-        (subjectsource, regsource, [("subject_id", "subject_id")]),
-        (subjectsource, reg_input, [("subject_id", "subject_id")]),
-        ])
-
-    # Registration filename substitutions
-    regsinksub = pe.Node(util.Merge(len(reg_output.outputs.__dict__)),
-                         name="regsinksub")
-
-    flutil.get_output_substitutions(registration, reg_output, regsinksub)
-
-    regreportsub = pe.Node(util.Merge(len(reg_report.outputs.__dict__)),
-                           name="regreportsub")
-
-    flutil.get_output_substitutions(registration, reg_report, regreportsub)
-
-    # Registration node substitutions
-    reg_mapnodes = ["func2anat","warptimeseries","warpexample","warpmask","meanwarp",
-                    "convertnormsurf","smoothnativesurf"]
-    regsinknodesubs = flutil.get_mapnode_substitutions(exp.nruns, reg_mapnodes)
-
-    flutil.set_substitutions(registration, regsink, regsinksub, regsinknodesubs)
-
-    reg_report_mapnodes = ["exfuncwarppng", "func2anat", "func2anatpng"]
-    regreportnodesubs = flutil.get_mapnode_substitutions(exp.nruns, reg_report_mapnodes)
-
-    flutil.set_substitutions(registration, regreport, regreportsub, regreportnodesubs)
-
-    # Connect the inputs
-    flutil.connect_inputs(registration, regsource, reg_input)
-
-    # Set up the subject containers
-    flutil.subject_container(registration, subjectsource, regsink)
-    flutil.subject_container(registration, subjectsource, regreport)
-
-    # Connect the heuristic outputs to the datainks
-    flutil.sink_outputs(registration, reg_output, regsink, "registration")
-    flutil.sink_outputs(registration, reg_report, regreport, "registration")
-
-    # Registration working output
-    registration.base_dir = working_dir
-
-    # Set crashdumps
-    flutil.archive_crashdumps(registration)
+regsource.inputs.template = "%s/%s/run_?/%s"
+regsource.inputs.field_template = dict(
+    warpfield=pjoin(data_dir, "%s/normalization/warpfield.nii.gz"),
+    source_images="%s/model/%s/run_?/%s%d.nii.gz")
+regsource.inputs.template_args = dict(fsl_affine=[["subject_id", "preproc", "func2anat_flirt.mat"]],
+                                      source_images=[["subject_id", spacedict[args.space], "image", "contrast"]],
+                                      warpfield=[["subject_id"]])
 
 
-    # Sampling to Surface
-    # -------------------
-
-    # Get sampling input and output
-    surfproj_input = surfproj.get_node("inputspec")
-    surfproj_output = surfproj.get_node("outputspec")
-
-    # Surface sampling datasource
-    surfsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
-                                         outfields=["reg_matrix",
-                                                    "cope",
-                                                    "varcope"],
-                                         base_directory=project_dir,
-                                         sort_filelist=True),
-                         name="surfsource")
-
-    if args.space == "surface":
-        surfsource.inputs.template = "Analysis/Nipype/" + args.paradigm + "/%s/%s/run_?/%s%d.nii.gz"
-        surfsource.inputs.field_template = dict(
-            reg_matrix= "Analysis/Nipype/" + args.paradigm + "/%s/registration/run_?/register.dat")
-        surfsource.inputs.template_args = dict(cope = [["subject_id", "model/surface", "cope", "contrast"]],
-                                               varcope = [["subject_id", "model/surface", "varcope", "contrast"]],
-                                               reg_matrix = [["subject_id"]])
-
-    # Connect contrast names to datasource, which wants a 1-based index
-    def get_con_img_idx(contrast_name):
-        """Return the index corresponding to the name of a contrast."""
-        return [i+1 for i, data in enumerate(exp.contrasts) if data[0] == contrast_name][0]
-
-    surfproj.connect(connames, ("contrast", get_con_img_idx), surfsource, "contrast")
-
-    # Connect the inputs
-    flutil.connect_inputs(surfproj, surfsource, surfproj_input, makelist = ["volume_file"])
-
-    surfproj.connect([
-        (subjectsource, surfsource,   [("subject_id", "subject_id")]),
-        (subjectsource, surfproj_input, [("subject_id", "subject_id")]),
-        ])
-
-    # Set the smoothing value
-    surfproj_input.inputs.smooth_fwhm = 5.
-
-    # Surf Projection Datasink
-    surfprojsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
-                           name="surfprojsink")
-
-    # Filename substitutions
-    surfprojsinksub = pe.Node(util.Merge(len(surfproj_output.outputs.__dict__)),
-                              name="surfprojsinksub")
-
-    flutil.get_output_substitutions(surfproj, surfproj_output, surfprojsinksub)
-
-    flutil.sink_outputs(surfproj, surfproj_output, surfprojsink, "surfprojection")
-
-    # Node substitutions
-    surfproj_mapnodes = ["copesmoother","varcopesmoother"]
-    surfprojsinknodesubs = flutil.get_mapnode_substitutions(exp.nruns, surfproj_mapnodes)
-    surfprojsinknodesubs.extend([("_contrast_",""),("_hemi_","")])
-
-    flutil.set_substitutions(surfproj, surfprojsink, surfprojsinksub, surfprojsinknodesubs)
-
-    # Set up the subject containers
-    flutil.subject_container(surfproj, subjectsource, surfprojsink)
-
-    # Working output
-    surfproj.base_dir = working_dir
-
-    # Set crashdumps
-    flutil.archive_crashdumps(surfproj)
+# Registration Datasink nodes
+regsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
+                  name="regsink")
 
 
-    # Across-run Fixed Effects
-    # ------------------------
 
-    # Figure out which fixed_fx workflow we want
-    fixed_fx = locals()["fixed_fx_%s"%args.space]
+# Registration connections
+registration.connect([
+    (subjectsource, regsource,     [("subject_id", "subject_id")]),
+    (imagesource,   regsource,     [("image", "image")]),
+    (connames,      regsource,     [(("contrast", lambda x: [i+1 for i in get_contrast_idx(x)]), "contrast")]),
+    (regsource,     reg_input,     [("warpfield", "warpfield"),
+                                    ("source_images", "vol_source"),
+                                    ("fsl_affine", "fsl_affine")]),
+    ])
 
-    # "Use" the fixed_fx workflows so pyflake shuts up
-    _ = fixed_fx_volume
-    _ = fixed_fx_surface
+# Registration filename substitutions
+regsinksub = pe.Node(util.Merge(len(reg_output.outputs.__dict__)),
+                     name="regsinksub")
 
-    # Get fixed_fx input and output
-    ffx_input = fixed_fx.get_node("inputspec")
-    ffx_output = fixed_fx.get_node("outputspec")
-    ffx_report = fixed_fx.get_node("report")
+flutil.get_output_substitutions(registration, reg_output, regsinksub)
 
-    # Fixed effects datasource node
-    if args.space == "volume":
-        ffxsource = pe.Node(nio.DataGrabber(infields=["subject_id","contrast"],
-                                            outfields=["cope","varcope"],
-                                            base_directory = project_dir,
-                                            sort_filelist=True),
-                            name="ffxsource")
+# Registration node substitutions
+reg_mapnodes = ["applywarp", "surfproject", "surftransform",
+                "convertnormsurf","smoothnativesurf", "smoothnormsurf"]
 
-        ffxsource.inputs.template = "Analysis/Nipype/" + args.paradigm + "/%s/model/volume/run_?/%s%d.nii.gz"
-        ffxsource.inputs.template_args = dict(cope = [["subject_id", "cope", "contrast"]],
-                                              varcope = [["subject_id", "varcope", "contrast"]])
-    elif args.space == "surface":
-        ffxsource = pe.Node(nio.DataGrabber(infields=["subject_id","contrast","hemi"],
-                                            outfields=["cope"],
-                                            base_directory = project_dir,
-                                            sort_filelist=True),
-                            name="ffxsource")
+regsinksubs = flutil.get_mapnode_substitutions(exp.nruns, reg_mapnodes)
+regsinksubs.extend([("_image_cope", ""),
+                    ("_image_varcope", ""),
+                    ("_contrast_", "")])
 
-        ffxsource.inputs.template = "Analysis/Nipype/" + args.paradigm + "/%s/surfprojection/%s/%s/run_?/%s.nii.gz"
-        ffxsource.inputs.template_args = dict(cope = [["subject_id", "contrast", "hemi", "cope"]],
-                                              varcope = [["subject_id", "contrast", "hemi", "varcope"]])
+def set_reg_subs(contrast):
+    
+    for c in get_contrast_idx(contrast):
+        c += 1
+        regsinksubs.extend([("cope%d"%c, "cope"), ("varcope%d"%c, "varcope")])
+    return regsinksubs
 
-        hemisource = pe.Node(util.IdentityInterface(fields=["hemi"]),
-                             iterables=("hemi",["lh","rh"]),
-                             name="hemisource")
-        fixed_fx.connect(hemisource, "hemi", ffxsource, "hemi")
+registration.connect(connames, ("contrast", set_reg_subs), regsink, "substitutions")
 
-    # Fixed effects Datasink nodes
-    ffxsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
-                      name="ffxsink")
+# Set up the subject containers
+flutil.subject_container(registration, subjectsource, regsink)
 
-    ffxreport = pe.Node(nio.DataSink(base_directory=report_dir),
-                        name="ffxreport")
+# Connect the heuristic outputs to the datainks
+flutil.sink_outputs(registration, reg_output, regsink, "registration")
 
-    # Fixed effects connections
-    fixed_fx.connect(subjectsource, "subject_id", ffxsource, "subject_id")
-    if args.space == "surface":
-        fixed_fx.connect(hemisource, "hemi", ffx_input, "hemi")
+# Registration working output
+registration.base_dir = working_dir
 
-    # Connect contrast names to datasource
-    fixed_fx.connect(connames, "contrast", ffxsource, "contrast")
+# Set crashdumps
+flutil.archive_crashdumps(registration)
 
-    # Fixed effects filename substitutions
-    ffxsinksub = pe.Node(util.Merge(len(ffx_output.outputs.__dict__)),
-                         name="ffxsinksub")
 
-    flutil.get_output_substitutions(fixed_fx, ffx_output, ffxsinksub)
+# Across-run Fixed Effects
+# ========================
 
-    ffxreportsub = pe.Node(util.Merge(len(ffx_report.outputs.__dict__)),
-                           name="ffxreportsub")
+# Get the workflow and nodes
+fixed_fx, ffx_input, ffx_output = get_fixedfx_workflow()
 
-    flutil.get_output_substitutions(fixed_fx, ffx_report, ffxreportsub)
+# Fixed fx datasource
+ffxsource = pe.Node(nio.DataGrabber(infields=["subject_id",
+                                              "contrast"],
+                                    outfields=["cope",
+                                               "varcope",
+                                               "dof_file"],
+                                    base_directory=analysis_dir,
+                                    sort_filelist=True),
+                    name="ffxsource")
 
-    # Fixed effects node substitutions
-    flutil.set_substitutions(fixed_fx, ffxsink, ffxsinksub, [("_contrast_", ""), ("_hemi_","")])
+ffxsource.inputs.template = "%s/registration/%s/run_?/%s_warp.nii.gz"
+ffxsource.inputs.field_template = dict(dof_file="%s/model/smoothed/run_?/dof")
+ffxsource.inputs.template_args = dict(cope=[["subject_id", "contrast", "cope"]],
+                                      varcope=[["subject_id", "contrast", "varcope"]],
+                                      dof_file=[["subject_id"]])
 
-    flutil.set_substitutions(fixed_fx, ffxreport, ffxreportsub, [("_contrast_", ""), ("_hemi_","")])
+# Connect inputs
+fixed_fx.connect([
+    (subjectsource, ffxsource, [("subject_id", "subject_id")]),
+    (connames,      ffxsource, [("contrast", "contrast")]),
+    ])
+flutil.connect_inputs(fixed_fx, ffxsource, ffx_input, makelist = ["cope", "varcope", "dof_file"])
 
-    # Connect the inputs
-    flutil.connect_inputs(fixed_fx, ffxsource, ffx_input, makelist = ["cope", "varcope"])
+# Fixed effects Datasink nodes
+ffxsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
+                  name="ffxsink")
 
-    # Set up the subject containers
-    flutil.subject_container(fixed_fx, subjectsource, ffxsink)
-    flutil.subject_container(fixed_fx, subjectsource, ffxreport)
+# Fixed effects filename substitutions
+ffxsinksub = pe.Node(util.Merge(len(ffx_output.outputs.__dict__)),
+                     name="ffxsinksub")
 
-    # Connect the heuristic outputs to the datainks
-    flutil.sink_outputs(fixed_fx, ffx_output, ffxsink, "fixed_fx")
-    flutil.sink_outputs(fixed_fx, ffx_report, ffxreport, "fixed_fx")
+flutil.get_output_substitutions(fixed_fx, ffx_output, ffxsinksub)
 
-    # Fixed effects working output
-    fixed_fx.base_dir = working_dir
+# Fixed effects node substitutions
+flutil.set_substitutions(fixed_fx, ffxsink, ffxsinksub, [("_contrast_", ""), ("_hemi_","")])
 
-    # Set crashdumps
-    flutil.archive_crashdumps(fixed_fx)
+# Set up the subject containers
+flutil.subject_container(fixed_fx, subjectsource, ffxsink)
+
+# Connect the heuristic outputs to the datainks
+flutil.sink_outputs(fixed_fx, ffx_output, ffxsink, "fixed_fx.%s"%args.space)
+
+# Fixed effects working output
+fixed_fx.base_dir = working_dir
+
+# Set crashdumps
+flutil.archive_crashdumps(fixed_fx)
 
 if __file__.endswith("fluid_fmri.py"):
     report_script = "python /mindhive/gablab/fluid/Nipype_Code/reporting/build_report.py "
@@ -580,5 +477,5 @@ if __name__ == "__main__":
     if args.run:
         workflow_runner(preproc, "preproc")
         workflow_runner(model, "model") 
-#        workflow_runner(registration, "reg")
-        
+        workflow_runner(registration, "reg")
+        workflow_runner(fixed_fx, "ffx")        
