@@ -3,6 +3,9 @@ Contains an FSL/Freesurfer preprocessing workflow.
 See the docstring for get_workflow() for more information.
 
 """
+import os
+from warnings import warn
+
 import nibabel as nib
 import nipype.interfaces.fsl as fsl
 import nipype.interfaces.freesurfer as fs
@@ -10,10 +13,46 @@ import nipype.interfaces.utility as util
 import nipype.interfaces.io as nio
 import nipype.pipeline.engine as pe    
 import nipype.algorithms.rapidart as ra
-from warnings import warn
+
+from nipype.interfaces import base
+from nipype.interfaces.fsl import base as fslbase
+from nipype.utils.filemanip import fname_presuffix
+
+class TimeSeriesMovieInput(fslbase.FSLCommandInputSpec):
+
+    in_file = base.File(exists=True,argstr="-ts %s")
+    ref_type = base.traits.String(argstr="-ref %s")
+    plot_file = base.File(exists=True,argstr="-plot %s")
+    norm_plot = base.traits.Bool(argstr="-normplot")
+    art_min = base.traits.Float(argstr="-min %.3f")
+    art_max = base.traits.Float(argstr="-max %.3f")
+    out_file = base.traits.File(genfile=True, argstr="-out %s")
+
+class TimeSeriesMovieOutput(base.TraitedSpec):
+
+    out_file = base.File(exists=True)
+
+class TimeSeriesMovie(fslbase.FSLCommand):
+
+    _cmd = "ts_movie"
+    input_spec = TimeSeriesMovieInput
+    output_spec = TimeSeriesMovieOutput
+
+    def _list_outputs(self):
+        outputs = self._outputs().get()
+        outputs["out_file"] = fname_presuffix(self.inputs.in_file,
+                                              suffix=".gif",
+                                              use_ext=False,
+                                              newpath=os.getcwd())
+        return outputs
+
+    def _gen_filename(self, name):
+        if name == "out_file":
+            return self._list_outputs()[name]
+        return None
 
 
-def get_preproc_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
+def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True, b0_unwarp=False):
     """Return a preprocessing workflow.
 
     The workflow primarily uses FSL, and mostly replicates FEAT preprocessing. By default,
@@ -21,6 +60,13 @@ def get_preproc_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
     and Freesufer anatomical space, but that can be turned off at the function-call level.
     It also will offer optional support for B0 unwarping using fieldmaps, but that is not
     yet fully implemented.
+
+    If mcflirt_sinc_search is set to True (as it is by default), the MCFLIRT motion-correction
+    algorithm will run with four stages of searching, the final stage using sinc interpolation.
+    Although this will lead to more accurate motion-correction, it will take considerably
+    more time and computation resources. Set as false to use MCFLIRT with the default search
+    schedule. Regardless of search mode, the final reslicing will be performed with sinc
+    interpolation.
 
     Input spec node always takes these three inputs:
         - Timeseries (image files)
@@ -92,13 +138,14 @@ def get_preproc_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
     exampleslice.inputs.sample_axial=2
 
     # Motion correct to middle volume of each run
-    realign =  pe.MapNode(fsl.MCFLIRT(stages=4,
-                                      interpolation="sinc",
+    realign =  pe.MapNode(fsl.MCFLIRT(interpolation="sinc",
                                       save_mats = True,
                                       save_plots = True,
                                       save_rms = True),
                           name="realign",
                           iterfield = ["in_file", "ref_file"])
+    if mcflirt_sinc_search:
+        realign.inputs.stages=4
 
     # Plot the rotations, translations, and displacement parameters from MCFLIRT
     plotrot = pe.MapNode(fsl.PlotMotionParams(in_source="fsl",
@@ -275,12 +322,19 @@ def get_preproc_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
                           iterfield=["in_file"],
                           name="plotmean")
 
-    # Make connections to ART
+    # Use our very own ts_movie script to generate a movie of the timeseries
+    tsmovie = pe.MapNode(TimeSeriesMovie(ref_type="mean"),
+                                         iterfield=["in_file", "plot_file"],
+                                         name="tsmovie")
+
+    # Make connections to ART and movie
     preproc.connect([
         (realign,    art,      [("par_file", "realignment_parameters")]),
         (maskfunc2,  art,      [("out_file", "realigned_files")]),
         (dilatemask, art,      [("out_file", "mask_file")]),
         (art,        plotmean, [("intensity_files", "in_file")]),
+        (inputnode,  tsmovie,  [("timeseries", "in_file")]),
+        (art,        tsmovie,  [("intensity_files", "plot_file")]),
         ])
 
     # Scale the median value each voxel in the run to 10000
@@ -423,6 +477,7 @@ def get_preproc_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
                      "functional_mask",
                      "realignment_parameters",
                      "outlier_files",
+                     "timeseries_movie",
                      "example_func_slices",
                      "mean_func_slices",
                      "intensity_plot",
@@ -450,6 +505,7 @@ def get_preproc_workflow(name="preproc", anat_reg=True, b0_unwarp=False):
         (realign,        outputnode, [("par_file", "realignment_parameters")]),
         (art,            outputnode, [("outlier_files", "outlier_files")]),
         (art,            outputnode, [("outlier_files", "outlier_volumes")]),
+        (tsmovie,        outputnode, [("out_file", "timeseries_movie")]),
         (plotmean,       outputnode, [("out_file", "intensity_plot")]),
         (exampleslice,   outputnode, [("out_file", "example_func_slices")]),
         (meanslice,      outputnode, [("out_file", "mean_func_slices")]),

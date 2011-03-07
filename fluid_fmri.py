@@ -122,7 +122,7 @@ flutil.get_output_substitutions(preproc, preproc_output, preprocsub)
 # Preproc node substitutions
 # NOTE: It would be nice if this were more intuitive, but I haven't
 # figured out a good way.  Have to hardcode the node names for now.
-preproc_mapnodes = ["art", "dilatemask", "highpass", "masksmoothfunc", "extractref",
+preproc_mapnodes = ["art", "dilatemask", "highpass", "masksmoothfunc", "extractref", "tsmovie",
                     "meanfunc3", "realign", "plotmean", "func2anat", "func2anatpng"]
 for plot in ["displacement", "rotation", "translation"]:
     preproc_mapnodes.append("plot%s"%plot)
@@ -268,7 +268,7 @@ model_mapnodes = ["featmodel", "sliceresidual", "modelestimate", "slicestats"]
 
 modelsinksubs = flutil.get_mapnode_substitutions(exp.nruns, model_mapnodes)
 
-modelsinksubs.append(("_contrast_","images/"))
+modelsinksubs.append(("_contrast_","stats/"))
 
 flutil.set_substitutions(model, modelsink, modelsub, modelsinksubs)
 
