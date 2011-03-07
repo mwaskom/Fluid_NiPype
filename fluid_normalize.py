@@ -23,8 +23,8 @@ parser.add_argument("-subjects", nargs="*",
                     help="process subject(s)")
 parser.add_argument("-nopype", dest="pype", action="store_false",
                     help="don't run the normalization workflow")
-parser.add_argument("-inseries", action="store_true", 
-                    help="force running nipype in series")
+parser.add_argument("-parallel", dest="inseries", action="store_false", 
+                    help="run workflows in parallel if cluster engine is availible")
 args = parser.parse_args()
 
 # Define some paths
@@ -94,16 +94,12 @@ cvtbrain = pe.Node(fs.MRIConvert(out_type="niigz", out_datatype="float"),
 cvthead = pe.Node(fs.MRIConvert(out_type="niigz", out_datatype="float"),
                   name="converthead")
 
-# Swap image dimensions to MNI orientation
-swapbrain = pe.Node(fsl.SwapDimensions(new_dims=mni_orient),
-                    name="swapbrain")
-
-swaphead = pe.Node(fsl.SwapDimensions(new_dims=mni_orient),
-                   name="swaphead")
-
 # FLIRT brain to MNI152_brain
 flirt = pe.Node(fsl.FLIRT(reference=target_brain),
                 name="flirt")
+sw = [-180, 180]
+for dim in ["x","y","z"]:
+    setattr(flirt.inputs, "searchr_%s"%dim, sw)
 
 # FNIRT head to MNI152
 fnirt = pe.Node(fsl.FNIRT(ref_file=target_head,
@@ -130,7 +126,7 @@ datasink = pe.Node(io.DataSink(base_directory=data_dir,
                                parameterization = False,
                                substitutions=[("norm_", "brain_"),
                                               ("nu_", "T1_"),
-                                              ("_out_newdims", ""),
+                                              ("_out", ""),
                                               ("T1_fieldwarp", "warpfield"),
                                               ("brain_flirt.mat", "affine.mat")]),
                    name="datasink")
@@ -147,19 +143,17 @@ normalize.connect([
     (subjectsource,   datasource,   [("subject_id", "subject_id")]),
     (datasource,      cvtbrain,     [("brain", "in_file")]),
     (datasource,      cvthead,      [("head", "in_file")]),
-    (cvtbrain,        swapbrain,    [("out_file", "in_file")]),
-    (cvthead,         swaphead,     [("out_file", "in_file")]),
-    (swapbrain,       flirt,        [("out_file", "in_file")]),
+    (cvtbrain,        flirt,        [("out_file", "in_file")]),
     (flirt,           fnirt,        [("out_matrix_file", "affine_file")]),
-    (swaphead,        fnirt,        [("out_file", "in_file")]),
-    (swapbrain,       warpbrain,    [("out_file", "in_file")]),
+    (cvthead,         fnirt,        [("out_file", "in_file")]),
+    (cvtbrain,        warpbrain,    [("out_file", "in_file")]),
     (fnirt,           warpbrain,    [("fieldcoeff_file", "field_file")]),
-    (swaphead,        warphead,     [("out_file", "in_file")]),
+    (cvthead,         warphead,     [("out_file", "in_file")]),
     (fnirt,           warphead,     [("fieldcoeff_file", "field_file")]),
     (warpbrain,       checkreg,     [("out_file", "in_file")]),
     (subjectsource,   datasink,     [("subject_id", "container")]),
-    (swapbrain,       datasink,     [("out_file", "normalization.@brain")]),
-    (swaphead,        datasink,     [("out_file", "normalization.@t1")]),
+    (cvtbrain,        datasink,     [("out_file", "normalization.@brain")]),
+    (cvthead,         datasink,     [("out_file", "normalization.@t1")]),
     (flirt,           datasink,     [("out_file", "normalization.@brain_flirted")]),
     (flirt,           datasink,     [("out_matrix_file", "normalization.@affine")]),
     (warphead,        datasink,     [("out_file", "normalization.@t1_warped")]),
