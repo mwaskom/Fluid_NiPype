@@ -7,14 +7,16 @@ from glob import glob
 import numpy as np
 from scipy import isnan
 from scipy.io import loadmat
+import nibabel as nib
 from htmltools import HTMLReport
 
 
 DATA_DIR = "/mindhive/gablab/fluid/Data"
-ANALYSIS_DIR = "/mindhive/gablab/fluid/Analysis/NiPype"
-REPORT_DIR = "/mindhive/gablab/fluid/Analysis/Report"
-STAGES = ["behavioral", "preproc", "registration", "model", "stats", "fixed_effects"]
+ANALYSIS_DIR = "/mindhive/gablab/fluid/Analysis/Nipype"
+REPORT_DIR = ANALYSIS_DIR
+STAGES = ["behavioral", "timeseries", "preproc", "registration" ,"model", "stats", "fixed_effects"]
 FUNC_RUNS = dict(iq=1,nback=4,mot_block=1,mot_jitter=1,resting=1)
+PARADIGM_MAP = dict(iq="IQ",nback="NBack",mot_block="MOT_Block",mot_jitter="MOT_Jitter",resting="Resting")
 
 def main():
 
@@ -25,9 +27,9 @@ def main():
 
     for subj in subjects:
     
-        topics = ["recon-all","fnirt","dti_vbm"]
+        topics = ["recon-all","fnirt"]
         for paradigm in FUNC_RUNS:
-            if os.path.exists(os.path.join(ANALYSIS_DIR, paradigm, "report", subj)):
+            if os.path.exists(os.path.join(ANALYSIS_DIR, paradigm, subj)):
                 topics.append(paradigm)
 
         for topic in topics:
@@ -51,7 +53,7 @@ def write_subject_home(subj):
     html.write_section_head("Reports")
 
     topics = []
-    for topic in ["recon-all", "fnirt", "dti_vbm"] + FUNC_RUNS.keys():
+    for topic in ["recon-all", "fnirt"] + FUNC_RUNS.keys():
         if os.path.exists(os.path.join(DATA_DIR, subj, "report", "%s_report.html"%topic)):
             topics.append(topic)
     html.write_link_table("%s_report.html", "%s", topics, 10)
@@ -93,6 +95,8 @@ def write_func_report(subj, paradigm, stage):
 
     if stage == "behavioral":
         write_bhvl_report(html, subj, paradigm)
+    elif stage == "timeseries":
+        write_timeseries_report(html, subj, paradigm)
     elif stage == "preproc":
         write_preproc_report(html, subj, paradigm)
     elif stage == "registration":
@@ -121,11 +125,15 @@ def write_recon_report(html, subj):
         html.write_link("Recon-all Log", samba_recon_text)
         html.write_text("Surface Placement",bold=True)
         html.newline()
-        html.write_image(os.path.join(DATA_DIR, subj, "gifs", "recon_movie.gif"))
+        html.write_image(os.path.join(DATA_DIR, subj, "gifs", "surf_movie.gif"))
         html.newline()
         html.write_text("Subcortical Segmentation",bold=True)
         html.newline()
         html.write_image(os.path.join(DATA_DIR, subj, "gifs", "aseg_movie.gif"))
+        html.newline()
+        html.write_text("White Matter Segmentation",bold=True)
+        html.newline()
+        html.write_image(os.path.join(DATA_DIR, subj, "gifs", "wmparc_movie.gif"))
     else:
         html.write_text("No recon-all status log exists")
 
@@ -133,7 +141,7 @@ def write_fnirt_report(html, subj):
     
     html.write_text("Final FNIRT Registration",bold=True)
     html.newline()
-    html.write_image(os.path.join(DATA_DIR, subj, "normalization", "final_reg.png"))
+    html.write_image(os.path.join(DATA_DIR, subj, "normalization", "brain_warp_to_mni.png"))
 
 def write_dti_report(html, subj):
     
@@ -144,7 +152,6 @@ def write_dti_report(html, subj):
     html.newline()
     html.write_image(os.path.join(
         ANALYSIS_DIR,"dti_vbm","report",subj,"preproc","image_slices.png"))
-    
 
 def write_func_links(html, subj, paradigm):
 
@@ -233,7 +240,8 @@ def write_nback_bhvl(html, subj, srcdir):
             sessacchit[level].append(hitacc)
             # If this makes sense next time I look at it, I get a cookie
             nonacc = np.mean([np.mean(stE.Block[j].Trials.iAccuracy[
-                 np.array([i for i, val in enumerate(stE.Block[j].Trials.sCorrectResponse) if val == np.array([])],dtype=np.int)])
+                 np.array([i for i, val in enumerate(stE.Block[j].Trials.sCorrectResponse) 
+                 if val == np.array([])],dtype=np.int)])
                  for j in range(len(stE.Block)) if stE.Block[j].iNumBack == level])
             nonaccstring += "%d-Back: %.3f"%(level, nonacc)
             nonaccstring += "".join("&nbsp;" for i in range(5))
@@ -259,24 +267,51 @@ def write_nback_bhvl(html, subj, srcdir):
     html.write_text(hitaccstring)
     html.write_text(nonaccstring)
     
+def write_timeseries_report(html, subj, paradigm):
+
+    for r in range(1, FUNC_RUNS[paradigm] + 1):
         
+        html.newline()
+        html.write_section_head("Run %d"%r)
+        html.newline()
+        
+        if paradigm != "resting":
+            tsfile = os.path.join(DATA_DIR, subj, "bold", "%s_run%d.nii.gz"%(PARADIGM_MAP[paradigm], r))
+        else:
+            tsfile = os.path.join(DATA_DIR, subj, "bold", "%s.nii.gz"%(PARADIGM_MAP[paradigm]))
+
+        html.write_text("Source file: %s"%tsfile)
+        html.newline()
+        try:
+            img = nib.load(tsfile)
+            html.write_text("Image Dimensions: %dx%dx%d"%img.get_shape()[:3])
+            html.newline()
+            html.write_text("Timepoints: %d"%img.get_shape()[-1])
+            html.newline()
+            html.write_text("Original path: %s"%os.path.realpath(tsfile))
+            html.newline()
+        except IOError:
+            html.write_text("Source timeseries could not be read by Nibabel")
+
+        moviefile = os.path.join(ANALYSIS_DIR, paradigm, subj, "preproc", "run_%d"%r, "timeseries_movie.gif")
+        html.write_image(moviefile)
 
 def write_preproc_report(html, subj, paradigm):
 
     for r in range(1, FUNC_RUNS[paradigm] + 1):
     
-        srcdir = os.path.join(ANALYSIS_DIR, paradigm, "report", subj, "preproc", "run_%d"%r)
+        srcdir = os.path.join(ANALYSIS_DIR, paradigm, subj, "preproc", "run_%d"%r)
 
         html.newline()
         html.write_section_head("Run %d"%r)
         html.newline()
 
         html.write_text("Motion Correction Target",bold=True)
-        html.write_image(os.path.join(srcdir, "example_func.png"))
+        html.write_image(os.path.join(srcdir, "example_func_slices.png"))
         html.newline()
         
         html.write_text("Mean Functional Image",bold=True)
-        html.write_image(os.path.join(srcdir, "mean_func.png"))
+        html.write_image(os.path.join(srcdir, "mean_func_slices.png"))
         html.newline()
 
         html.write_text("Mean Intensity Plot",bold=True)
@@ -284,7 +319,7 @@ def write_preproc_report(html, subj, paradigm):
         html.newline()
 
         try:
-            outfile = os.path.join(ANALYSIS_DIR,paradigm,"report",subj,"preproc","run_%d"%r,"outlier_volumes.txt")
+            outfile = os.path.join(ANALYSIS_DIR,paradigm,subj,"preproc","run_%d"%r,"outlier_volumes.txt")
             nout = len(open(outfile).read().strip().split())
             html.write_text("Total Outlier Volumes:&nbsp;",bold=True)
             html.write_text(nout)
@@ -304,25 +339,18 @@ def write_registration_report(html, subj, paradigm):
         
         html.write_section_head("Run %s"%r)
 
-        srcdir = os.path.join(ANALYSIS_DIR, paradigm, "report", subj, "registration", "run_%d"%r)
+        srcdir = os.path.join(ANALYSIS_DIR, paradigm, subj, "preproc", "run_%d"%r)
         
-        costfile = os.path.join(srcdir, "func2anat_cost.dat")
+        costfile = os.path.join(srcdir, "func2anat_tkreg.dat.mincost")
         try:
             cost = open(costfile).read().split()[0]
             html.write_text("Final boundary-based registration cost value: %s"%cost)
         except IOError:
             html.write_text("Could not open %s for reading"%costfile)
         html.newline(2)
-        
-        srcdir = os.path.join(ANALYSIS_DIR, paradigm, "report", subj, "registration", "run_%d"%r)
 
         html.write_text("Example func to native anatomical")
-        image = os.path.join(srcdir, "func2anat.png")
-        html.write_image(image)
-        html.newline()
-
-        html.write_text("Example func to mni152")
-        image = os.path.join(srcdir, "example_func_warp.png")
+        image = os.path.join(srcdir, "func2anat_slices.png")
         html.write_image(image)
         html.newline()
 
@@ -332,20 +360,20 @@ def write_model_report(html, subj, paradigm):
         
         html.write_section_head("Run %d"%r)
 
-        srcdir = os.path.join(ANALYSIS_DIR,paradigm,"report",subj,"model","volume","run_%d"%r)
+        srcdir = os.path.join(ANALYSIS_DIR,paradigm,subj,"model","smoothed","run_%d"%r)
         
         glm_img = os.path.join(srcdir, "design_image.png")
-        html.write_text("Design matrix")
+        html.write_text("Design Matrix")
         html.write_image(glm_img)
         html.newline()
 
         cov_img = os.path.join(srcdir, "design_covariance.png")
-        html.write_text("Design covariance")
+        html.write_text("Design Covariance")
         html.write_image(cov_img)
         html.newline()
 
-        res_img = os.path.join(srcdir, "residual.png")
-        html.write_text("Residual error")
+        res_img = os.path.join(srcdir, "sigmasquareds.png")
+        html.write_text("Residual Variance")
         html.write_image(res_img)
         html.newline()
 
@@ -353,10 +381,10 @@ def write_stats_report(html, subj, paradigm):
 
     for r in range(1, FUNC_RUNS[paradigm] +1):
         html.write_section_head("Run %d"%r)
-        srcdir = os.path.join(ANALYSIS_DIR,paradigm,"report",subj,"model","volume","stats")
+        srcdir = os.path.join(ANALYSIS_DIR,paradigm,subj,"model","smoothed","stats")
         contrasts = [p.split("/")[-1] for p in glob(os.path.join(srcdir,"*"))]
         contrasts.sort()
-        srcdir = os.path.join(ANALYSIS_DIR,paradigm,"report",subj,"model","volume","stats")
+        srcdir = os.path.join(ANALYSIS_DIR,paradigm,subj,"model","smoothed","stats")
         for contrast in contrasts:
             html.newline()
             html.write_text(contrast)
@@ -365,10 +393,9 @@ def write_stats_report(html, subj, paradigm):
 
 def write_ffx_report(html, subj, paradigm):
     
-    srcdir = os.path.join(ANALYSIS_DIR,paradigm,"report",subj,"fixed_fx")
+    srcdir = os.path.join(ANALYSIS_DIR,paradigm,subj,"fixed_fx", "volume")
     contrasts = [p.split("/")[-1] for p in glob(os.path.join(srcdir,"*"))]
     contrasts.sort()
-    srcdir = os.path.join(ANALYSIS_DIR,paradigm,"report",subj,"fixed_fx")
     for contrast in contrasts:
         html.newline()
         html.write_text(contrast)
