@@ -7,12 +7,10 @@ from nipype.interfaces import io
 from nipype.interfaces import fsl
 from nipype.interfaces import freesurfer as fs
 from nipype.interfaces import utility as util
-from nipype.interfaces import base
-from nipype.interfaces.fsl import base as fslbase
-from nipype.utils.filemanip import fname_presuffix
 from nipype.pipeline import engine as pe
 
 from fluid_utility import archive_crashdumps
+from workflows.interfaces import CheckReg
 
 # Parse command line arguments
 # ----------------------------
@@ -42,33 +40,6 @@ mni_orient = ("RL", "PA", "IS")
 
 # Define a CheckReg interface here for now (will likely migrate to Nipype source)
 # -------------------------------------------------------------------------------
-class CheckRegInput(fslbase.FSLCommandInputSpec):
-    
-    in_file = base.File(exists=True, argstr="%s", position=1)
-    out_file = base.File(genfile=True, argstr="%s", position=2)
-
-class CheckRegOutput(base.TraitedSpec):
-
-    out_file = base.File(exists=True)
-
-class CheckReg(fslbase.FSLCommand):
-
-    _cmd = "check_mni_reg"
-    input_spec = CheckRegInput
-    output_spec = CheckRegOutput
-
-    def _list_outputs(self):
-        outputs = self._outputs().get()
-        outputs["out_file"] = fname_presuffix(self.inputs.in_file,
-                                              suffix="_to_mni.png",
-                                              use_ext=False,
-                                              newpath=os.getcwd())
-        return outputs
-
-    def _gen_filename(self, name):
-        if name == "out_file":
-            return self._list_outputs()[name]
-        return None
 
 # Set up the workflow
 # -------------------

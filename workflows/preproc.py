@@ -3,7 +3,6 @@ Contains an FSL/Freesurfer preprocessing workflow.
 See the docstring for get_workflow() for more information.
 
 """
-import os
 from warnings import warn
 
 import nibabel as nib
@@ -14,43 +13,7 @@ import nipype.interfaces.io as nio
 import nipype.pipeline.engine as pe    
 import nipype.algorithms.rapidart as ra
 
-from nipype.interfaces import base
-from nipype.interfaces.fsl import base as fslbase
-from nipype.utils.filemanip import fname_presuffix
-
-class TimeSeriesMovieInput(fslbase.FSLCommandInputSpec):
-
-    in_file = base.File(exists=True,argstr="-ts %s")
-    ref_type = base.traits.String(argstr="-ref %s")
-    plot_file = base.File(exists=True,argstr="-plot %s")
-    norm_plot = base.traits.Bool(argstr="-normplot")
-    art_min = base.traits.Float(argstr="-min %.3f")
-    art_max = base.traits.Float(argstr="-max %.3f")
-    out_file = base.traits.File(genfile=True, argstr="-out %s")
-
-class TimeSeriesMovieOutput(base.TraitedSpec):
-
-    out_file = base.File(exists=True)
-
-class TimeSeriesMovie(fslbase.FSLCommand):
-
-    _cmd = "ts_movie"
-    input_spec = TimeSeriesMovieInput
-    output_spec = TimeSeriesMovieOutput
-
-    def _list_outputs(self):
-        outputs = self._outputs().get()
-        outputs["out_file"] = fname_presuffix(self.inputs.in_file,
-                                              suffix=".gif",
-                                              use_ext=False,
-                                              newpath=os.getcwd())
-        return outputs
-
-    def _gen_filename(self, name):
-        if name == "out_file":
-            return self._list_outputs()[name]
-        return None
-
+from .interfaces import TimeSeriesMovie
 
 def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True, b0_unwarp=False):
     """Return a preprocessing workflow.
@@ -64,7 +27,7 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
     If mcflirt_sinc_search is set to True (as it is by default), the MCFLIRT motion-correction
     algorithm will run with four stages of searching, the final stage using sinc interpolation.
     Although this will lead to more accurate motion-correction, it will take considerably
-    more time and computation resources. Set as false to use MCFLIRT with the default search
+    more time and computational resources. Set as false to use MCFLIRT with the default search
     schedule. Regardless of search mode, the final reslicing will be performed with sinc
     interpolation.
 
