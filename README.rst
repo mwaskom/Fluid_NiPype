@@ -33,7 +33,7 @@ VBM Analysis of DTI-based images.
 Workflows
 ---------
 Package with workflow modules.
-*Should* be entirely independent of anything Gfluid relevant.
+Should be entirely independent of anything Gfluid relevant.
 
 ``preproc.py`` -- 
 Preprocessing.
@@ -41,8 +41,8 @@ Preprocessing.
 ``fsl_model.py`` -- 
 First-level FSL modelfitting .
 
-``spm_model.py`` -- 
-First-level SPM modelfitting.
+``registration.py`` --
+Application of normalization parameters and sampling to surface manifolds.
 
 ``fixed_fx.py`` -- 
 Second-level (within-subject) fixed-effect analysis.
@@ -50,8 +50,11 @@ Second-level (within-subject) fixed-effect analysis.
 ``resting_preproc.py`` -- 
 Preprocessing for resting-state scans.
 
-``vbm_preproc.py``
+``vbm_preproc.py`` -- 
 Preprocssing for arbitrary VBM style analysis.
+
+``interfaces.py`` -- 
+A few custom interfaces for scripts that only exist at MIT.
 
 Experiment
 ----------

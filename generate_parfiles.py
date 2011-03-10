@@ -5,14 +5,7 @@ from glob import glob
 import numpy as np
 import scipy.io as scio
 
-def main():
-
-    # Get subject from first command line arg
-    try:
-        subject = sys.argv[1]
-    # Print usage and quit if we didn't get a subject
-    except IndexError:
-        sys.exit("\tUSAGE: generate_parfiles.py subject_id")
+def main(subject):
 
     # Figure out ante/post based on subject id
     if subject.endswith("p"):
@@ -187,5 +180,10 @@ def gen_rt(matfiletemplate, subject, srcdir, trgdir):
                 raise error
 
 if __name__ == "__main__":
-
-    main()
+    # Get subject from first command line arg
+    try:
+        subject = sys.argv[1]
+    # Print usage and quit if we didn't get a subject
+    except IndexError:
+        sys.exit("\tUSAGE: generate_parfiles.py subject_id")
+    main(subject)

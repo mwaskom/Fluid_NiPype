@@ -226,7 +226,7 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
                            iterfield = ["in_file"],
                            name="getthreshold")
 
-    # Threshold the first fun of the functional data at 10% of the 98th percentile
+    # Threshold the functional data at 10% of the 98th percentile
     threshold = pe.MapNode(fsl.ImageMaths(out_data_type="char",
                                           suffix="_thresh"),
                            iterfield = ["in_file"],

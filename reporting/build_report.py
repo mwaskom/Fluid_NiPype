@@ -13,7 +13,7 @@ from htmltools import HTMLReport
 
 DATA_DIR = "/mindhive/gablab/fluid/Data"
 ANALYSIS_DIR = "/mindhive/gablab/fluid/Analysis/Nipype"
-REPORT_DIR = ANALYSIS_DIR
+REPORT_DIR = "/mindhive/gablab/fluid/Analysis/Report"
 STAGES = ["behavioral", "timeseries", "preproc", "registration" ,"model", "stats", "fixed_effects"]
 FUNC_RUNS = dict(iq=1,nback=4,mot_block=1,mot_jitter=1,resting=1)
 PARADIGM_MAP = dict(iq="IQ",nback="NBack",mot_block="MOT_Block",mot_jitter="MOT_Jitter",resting="Resting")
@@ -283,12 +283,15 @@ def write_timeseries_report(html, subj, paradigm):
         html.write_text("Source file: %s"%tsfile)
         html.newline()
         try:
+            html.write_text("Original path: %s"%os.path.realpath(tsfile))
+            html.newline()
+        except OSError:
+            pass
+        try:
             img = nib.load(tsfile)
             html.write_text("Image Dimensions: %dx%dx%d"%img.get_shape()[:3])
             html.newline()
             html.write_text("Timepoints: %d"%img.get_shape()[-1])
-            html.newline()
-            html.write_text("Original path: %s"%os.path.realpath(tsfile))
             html.newline()
         except IOError:
             html.write_text("Source timeseries could not be read by Nibabel")

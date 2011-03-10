@@ -14,7 +14,6 @@ units = "secs"
 nruns = 4
 
 fsl_bases = {"dgamma":{"derivs":False}}
-spm_bases = {"hrf":[0,0]}
 
 parfile_base_dir = "/mindhive/gablab/fluid/Data"
 parfile_template = "%s/parfiles/NBack_r%d_d%d_%s_%s.txt"
