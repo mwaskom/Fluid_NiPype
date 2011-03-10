@@ -5,8 +5,8 @@ import nipype.interfaces.utility as util
 
 
 def get_registration_workflow(name="registration", 
-                              volume=True,
-                              surface=True,
+                              volume=False,
+                              surface=False,
                               surface_smooth=True):
 
     registration = pe.Workflow(name=name)
@@ -51,7 +51,8 @@ def get_registration_workflow(name="registration",
                                  name="surfproject")
         surfproject.inputs.sampling_method="average"
 
-        surftransform = pe.MapNode(fs.SurfaceTransform(target_subject="fsaverage"),
+        surftransform = pe.MapNode(fs.SurfaceTransform(target_subject="fsaverage",
+                                                       reshape=True),
                                    iterfield=["source_file"],
                                    name="surftransform")
 
@@ -63,6 +64,7 @@ def get_registration_workflow(name="registration",
             (inputnode,    surfproject,    [("surf_source", "source_file"),
                                             ("subject_id", "subject_id"),
                                             ("tkreg_affine", "reg_file")]),
+            (hemisource,   surfproject,    [("hemi", "hemi")]),
             (surfproject,  surftransform,  [("out_file", "source_file")]),
             (inputnode,    surftransform,  [("subject_id", "source_subject")]),
             (hemisource,   surftransform,  [("hemi", "hemi")]),
@@ -96,12 +98,19 @@ def get_registration_workflow(name="registration",
     if volume:
         outfields.append("warped_image")
     if surface:
-        outfields.extend(["hemi_image", "hemi_image_fsaverage", "hemi"])
-    outputnode = pe.Node(util.IdentityInterface(fields=["warped_image"]),
+        outfields.extend(["image", "image_fsaverage"])
+   
+    outputnode = pe.Node(util.IdentityInterface(fields=outfields),
                          name="outputspec")
 
-    registration.connect([
-        (applywarp, outputnode, [("out_file", "warped_image")]),
-        ])
+    if volume:
+        registration.connect([
+            (applywarp, outputnode, [("out_file", "warped_image")]),
+            ])
+    if surface:
+        registration.connect([
+            (smoothnatsurf, outputnode, [("out_file", "image")]),
+            (cvtnormsurf,   outputnode, [("out_file", "image_fsaverage")]),
+            ])
     
     return registration, inputnode, outputnode

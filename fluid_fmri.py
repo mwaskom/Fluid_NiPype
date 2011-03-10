@@ -6,10 +6,12 @@ import os
 import argparse
 import inspect
 from copy import deepcopy
+from tempfile import mkdtemp
 from os.path import join as pjoin
 
 import nipype.pipeline.engine as pe
 import nipype.interfaces.io as nio
+from nipype.interfaces import fsl, freesurfer
 import nipype.interfaces.utility as util
 from nipype.interfaces.base import Bunch
 
@@ -25,18 +27,20 @@ parser = argparse.ArgumentParser(description="Main interface for GFluid fMRI Nip
 
 parser.add_argument("-paradigm", metavar="paradigm", 
                     help="experimental paradigm")
-parser.add_argument("-subjects", nargs="*",
+parser.add_argument("-s", "-subjects", nargs="*", dest="subjects",
                     metavar="subject_id",
                     help="process subject(s)")
 parser.add_argument("-workflows", nargs="*",
                     metavar="WF",
                     help="which workflows to run")
-parser.add_argument("-modelspace", metavar="space", dest="space", default="volume",
-                    help="space to run the model in (volume, surface)")
+parser.add_argument("-surface", action="store_true",
+                    help="run processing for surface analysis")
 parser.add_argument("-norun",dest="run",action="store_false",
                     help="do not run the pypeline")
 parser.add_argument("-inseries",action="store_true",
                     help="force running in series")
+parser.add_argument("-tempdir",action="store_true",
+                    help="write all output to temporary directory")
 args = parser.parse_args()
 
 # Define a default paradigm, for importability and convenince
@@ -55,8 +59,6 @@ except ImportError:
 
 if args.workflows is None:
     args.workflows = []
-elif args.workflows == ["all"]:
-    args.workflows = ["preproc", "reg", "model", "ffx"]
 
 # Determine the subjects list
 # Hierarchy:
@@ -68,21 +70,42 @@ if args.subjects is not None:
 elif hasattr(exp, "subject_list"):
     subject_list = exp.subject_list
 else:
-    subject_list = ["gf%02d"%id for id in [4, 5, 9, 13, 14]]
+    subject_list = []
 
 if hasattr(exp, "exclude_subjects"):
     subject_list = [s for s in subject_list if s not in exp.exclude_subjects]
 
 print "Subjects: ", " ".join(subject_list)
 
-# Define some paths
+# Define the base paths
 project_dir = "/mindhive/gablab/fluid"
-data_dir = os.path.join(project_dir, "Data")
+data_dir = "/mindhive/gablab/fluid/Data"
+
+if args.tempdir:
+    project_dir = mkdtemp(prefix="nipype-")
+    print "Temporary directory: %s"%project_dir 
+
 analysis_dir = os.path.join(project_dir, "Analysis/Nipype", args.paradigm)
 working_dir = os.path.join(project_dir, "Analysis/Nipype/workingdir", args.paradigm)
 
+# Smoothing kernel
+# Currently used for both volume and surface
+smooth_fwhm = 6
+
+# Write the analysis dir to avoid Trait Errors
+try:
+    os.makedirs(analysis_dir)
+except OSError:
+    pass
+
 # Set the Freesurfer Subjects Directory 
 os.environ["SUBJECTS_DIR"] = data_dir
+
+# Figure out the space we're working in
+if args.surface:
+    space = "surface"
+else:
+    space = "volume"  
 
 # Subject source node
 # -------------------
@@ -96,7 +119,8 @@ subjectsource = pe.Node(util.IdentityInterface(fields=["subject_id"]),
 # Get preproc input and output
 preproc, preproc_input, preproc_output = get_preproc_workflow(name="preproc",
                                                               b0_unwarp=False,
-                                                              anat_reg=True)
+                                                              anat_reg=True,
+                                                              mcflirt_sinc_search=False)
 
 # Preproc datasource node
 preprocsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
@@ -154,7 +178,7 @@ flutil.archive_crashdumps(preproc)
 
 # Set the other preprocessing inputs
 preproc_input.inputs.hpf_cutoff = exp.hpcutoff/exp.TR
-preproc_input.inputs.smooth_fwhm = 5
+preproc_input.inputs.smooth_fwhm = smooth_fwhm
 
 
 # First-Level Model
@@ -231,7 +255,7 @@ def subjectinfo(info, exp):
 spacedict = dict(volume="smoothed", surface="unsmoothed")
 
 # Get model input and output
-model, model_input, model_output = get_model_workflow(name="%s_model"%spacedict[args.space])
+model, model_input, model_output = get_model_workflow(name="%s_model"%spacedict[space])
 
 # Set up the date sources for each space
 modelsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
@@ -249,7 +273,7 @@ modelsource.inputs.template_args = dict(
     outlier_files=[["subject_id", "preproc", "outlier_files.txt"]],
     realignment_parameters=[["subject_id", "preproc", "realignment_parameters.par"]],
     overlay_background=[["subject_id", "preproc", "example_func.nii.gz"]],
-    timeseries=[["subject_id", "preproc", "%s_timeseries.nii.gz"%spacedict[args.space]]])
+    timeseries=[["subject_id", "preproc", "%s_timeseries.nii.gz"%spacedict[space]]])
 
 
 # Model Datasink nodes
@@ -306,7 +330,7 @@ flutil.connect_inputs(model, modelsource, model_input)
 flutil.subject_container(model, subjectsource, modelsink)
 
 # Connect the heuristic outputs to the datainks
-flutil.sink_outputs(model, model_output, modelsink, "model.%s"%spacedict[args.space])
+flutil.sink_outputs(model, model_output, modelsink, "model.%s"%spacedict[space])
 
 # Set the other model inputs
 model_input.inputs.TR = exp.TR
@@ -325,54 +349,81 @@ flutil.archive_crashdumps(model)
 # Registration
 # ============
 
+# Set up a node to define the space so that working dir gets nested properly
+definespace = pe.Node(util.IdentityInterface(fields=["space"]),
+                      iterables=("space", [space]),
+                      name="definespace")
+
 # Get registration input and output
-registration, reg_input, reg_output = get_registration_workflow(surface=False)
+if space == "volume":
+    registration, reg_input, reg_output = get_registration_workflow(volume=True)
+elif space == "surface":
+    registration, reg_input, reg_output = get_registration_workflow(surface=True)
 
 imagesource = pe.Node(util.IdentityInterface(fields=["image"]),
                       iterables=("image", ["cope", "varcope"]),
                       name="imagesource")
 
 # Registration datasource node
+if space == "volume":
+    outfields=["warpfield","fsl_affine","source_images"]
+    template_args = dict(fsl_affine=[["subject_id", "preproc", "func2anat_flirt.mat"]],
+                         warpfield=[["subject_id"]])
+elif space == "surface":
+    outfields = ["tkreg_affine", "source_images"]
+    template_args = dict(tkreg_affine=[["subject_id", "preproc", "func2anat_tkreg.dat"]])
+
 regsource = pe.Node(nio.DataGrabber(infields=["subject_id",
                                               "contrast",
-                                              "image"],
-                                    outfields=["warpfield",
-                                               "fsl_affine",
-                                               "source_images"],
+                                              "image",
+                                              "space"],
+                                    outfields=outfields,
                                     base_directory=analysis_dir,
                                     sort_filelist=True),
                     name="regsource")
 
 regsource.inputs.template = "%s/%s/run_?/%s"
-regsource.inputs.field_template = dict(
-    warpfield=pjoin(data_dir, "%s/normalization/warpfield.nii.gz"),
-    source_images="%s/model/%s/run_?/%s%d.nii.gz")
-regsource.inputs.template_args = dict(fsl_affine=[["subject_id", "preproc", "func2anat_flirt.mat"]],
-                                      source_images=[["subject_id", spacedict[args.space], "image", "contrast"]],
-                                      warpfield=[["subject_id"]])
+regsource.inputs.field_template = dict(source_images="%s/model/%s/run_?/%s%d.nii.gz")
 
+if space == "volume":
+    regsource.inputs.field_template["warpfield"] = pjoin(data_dir, "%s/normalization/warpfield.nii.gz")
+
+regsource.inputs.template_args = template_args
+regsource.inputs.template_args['source_images'] = [["subject_id",spacedict[space],"image","contrast"]]
+
+registration.connect(definespace, "space", regsource, "space")
 
 # Registration Datasink nodes
 regsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
                   name="regsink")
-
-
 
 # Registration connections
 registration.connect([
     (subjectsource, regsource,     [("subject_id", "subject_id")]),
     (imagesource,   regsource,     [("image", "image")]),
     (connames,      regsource,     [(("contrast", lambda x: [i+1 for i in get_contrast_idx(x)]), "contrast")]),
-    (regsource,     reg_input,     [("warpfield", "warpfield"),
-                                    ("source_images", "vol_source"),
-                                    ("fsl_affine", "fsl_affine")]),
     ])
+
+if space == "volume": 
+    registration.connect([
+        (regsource, reg_input, [("source_images", "vol_source"),
+                                ("warpfield", "warpfield"),
+                                ("fsl_affine", "fsl_affine")]),
+         ])
+elif space == "surface":
+    reg_input.inputs.smooth_fwhm = smooth_fwhm
+    registration.connect([
+        (regsource,     reg_input, [("source_images", "surf_source"),
+                                    ("tkreg_affine", "tkreg_affine")]),
+        (subjectsource, reg_input, [("subject_id", "subject_id")]),
+         ])
 
 # Registration filename substitutions
 regsinksub = pe.Node(util.Merge(len(reg_output.outputs.__dict__)),
                      name="regsinksub")
 
-flutil.get_output_substitutions(registration, reg_output, regsinksub)
+if space == "volume":
+    flutil.get_output_substitutions(registration, reg_output, regsinksub)
 
 # Registration node substitutions
 reg_mapnodes = ["applywarp", "surfproject", "surftransform",
@@ -381,16 +432,25 @@ reg_mapnodes = ["applywarp", "surfproject", "surftransform",
 regsinksubs = flutil.get_mapnode_substitutions(exp.nruns, reg_mapnodes)
 regsinksubs.extend([("_image_cope", ""),
                     ("_image_varcope", ""),
-                    ("_contrast_", "")])
+                    ("_contrast_", ""),
+                    ("_hemi_lh", ""),
+                    ("_hemi_rh", ""),
+                    ("_out", ""),
+                    ("_space_%s"%space,"")])
 
+"""
 def set_reg_subs(contrast):
     
     for c in get_contrast_idx(contrast):
         c += 1
         regsinksubs.extend([("cope%d"%c, "cope"), ("varcope%d"%c, "varcope")])
     return regsinksubs
+"""
 
-registration.connect(connames, ("contrast", set_reg_subs), regsink, "substitutions")
+for c, name in enumerate(exp.contrasts):
+    regsinksubs.extend([("cope%d"%c, "cope"), ("varcope%d"%c, "varcope")])
+regsinksubs.reverse()
+regsink.inputs.substitutions = regsinksubs
 
 # Set up the subject containers
 flutil.subject_container(registration, subjectsource, regsink)
@@ -409,11 +469,18 @@ flutil.archive_crashdumps(registration)
 # ========================
 
 # Get the workflow and nodes
-fixed_fx, ffx_input, ffx_output = get_fixedfx_workflow()
+if space == "volume":
+    fixed_fx, ffx_input, ffx_output = get_fixedfx_workflow()
+elif space == "surface":
+    fixed_fx, ffx_input, ffx_output = get_fixedfx_workflow(volume_report=False)
+    
+
+infields = ["subject_id", "contrast", "space"]
+if space == "surface":
+    infields.append("hemi")
 
 # Fixed fx datasource
-ffxsource = pe.Node(nio.DataGrabber(infields=["subject_id",
-                                              "contrast"],
+ffxsource = pe.Node(nio.DataGrabber(infields=infields,
                                     outfields=["cope",
                                                "varcope",
                                                "dof_file"],
@@ -421,18 +488,58 @@ ffxsource = pe.Node(nio.DataGrabber(infields=["subject_id",
                                     sort_filelist=True),
                     name="ffxsource")
 
-ffxsource.inputs.template = "%s/registration/%s/run_?/%s_warp.nii.gz"
-ffxsource.inputs.field_template = dict(dof_file="%s/model/smoothed/run_?/dof")
-ffxsource.inputs.template_args = dict(cope=[["subject_id", "contrast", "cope"]],
-                                      varcope=[["subject_id", "contrast", "varcope"]],
-                                      dof_file=[["subject_id"]])
+
+if space == "volume":
+    ffxsource.inputs.template = "%s/registration/%s/run_?/%s_warp.nii.gz"
+    ffxsource.inputs.field_template = dict(dof_file="%s/model/smoothed/run_?/dof")
+    ffxsource.inputs.template_args = dict(cope=[["subject_id", "contrast", "cope"]],
+                                          varcope=[["subject_id", "contrast", "varcope"]],
+                                          dof_file=[["subject_id"]])
+elif space == "surface":
+    ffxsource.inputs.template = "".join(
+        ["%s/registration/%s/run_?/%s.%s.","fsaverage_smooth%d.nii.gz"%smooth_fwhm])
+    ffxsource.inputs.field_template = dict(dof_file="%s/model/unsmoothed/run_?/dof")
+    ffxsource.inputs.template_args = dict(cope=[["subject_id", "contrast", "hemi", "cope"]],
+                                          varcope=[["subject_id", "contrast", "hemi", "varcope"]],
+                                          dof_file=[["subject_id"]])
+    hemisource = pe.Node(util.IdentityInterface(fields=["hemi"]),
+                         iterables=("hemi", ["lh", "rh"]),
+                         name="hemisource")
+    fixed_fx.connect(hemisource, "hemi", ffxsource, "hemi")
+
+def make_list(f):
+    if not isinstance(f, list):
+        return [f]
+    return f
 
 # Connect inputs
 fixed_fx.connect([
     (subjectsource, ffxsource, [("subject_id", "subject_id")]),
     (connames,      ffxsource, [("contrast", "contrast")]),
+    (definespace,   ffxsource, [("space", "space")]),
+    (ffxsource,     ffx_input, [(("cope", make_list), "cope"),
+                                (("varcope", make_list), "varcope"),
+                                (("dof_file", make_list), "dof_file")]),
     ])
-flutil.connect_inputs(fixed_fx, ffxsource, ffx_input, makelist = ["cope", "varcope", "dof_file"])
+
+def select_first(files):
+    if isinstance(files, list):
+        return files[0]
+    return files
+
+if space == "volume":
+    ffx_input.inputs.mask = fsl.Info.standard_image("MNI152_T1_2mm_brain_mask.nii.gz")
+elif space == "surface":
+    # Generate a mask by binning the cope
+    # Maybe suboptimal?  Are copes ever <1 and important?
+    getmask = pe.Node(fsl.ImageMaths(op_string="-abs -bin",
+                                     suffix="_mask"),
+                      name="getmask")
+    fixed_fx.connect([
+        (ffxsource, getmask,   [(("cope", select_first), "in_file")]),
+        (getmask,   ffx_input, [("out_file", "mask")]),
+        ])
+
 
 # Fixed effects Datasink nodes
 ffxsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
@@ -445,13 +552,15 @@ ffxsinksub = pe.Node(util.Merge(len(ffx_output.outputs.__dict__)),
 flutil.get_output_substitutions(fixed_fx, ffx_output, ffxsinksub)
 
 # Fixed effects node substitutions
-flutil.set_substitutions(fixed_fx, ffxsink, ffxsinksub, [("_contrast_", ""), ("_hemi_","")])
+flutil.set_substitutions(fixed_fx, ffxsink, ffxsinksub, [("_contrast_", ""), 
+                                                         ("_hemi_",""),
+                                                         ("_space_%s"%space,"")])
 
 # Set up the subject containers
 flutil.subject_container(fixed_fx, subjectsource, ffxsink)
 
 # Connect the heuristic outputs to the datainks
-flutil.sink_outputs(fixed_fx, ffx_output, ffxsink, "fixed_fx.%s"%args.space)
+flutil.sink_outputs(fixed_fx, ffx_output, ffxsink, "fixed_fx.%s"%space)
 
 # Fixed effects working output
 fixed_fx.base_dir = working_dir
