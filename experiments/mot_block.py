@@ -16,7 +16,7 @@ nruns = 1
 fsl_bases = {"dgamma":{"derivs":False}}
 
 parfile_base_dir = "/mindhive/gablab/fluid/Data"
-parfile_template = "%s/parfiles/MOT_Jitter_r%d_d%d_%s_%s.txt"
+parfile_template = "%s/parfiles/MOT_Block_r%d_d%d_%s_%s.txt"
 parfile_args = ["subject_id", "run_number", "day", "event", "subject_id"]
 
 events = ["speed1", "speed2", "speed3", "speed4", "resp"]
