@@ -142,16 +142,7 @@ preprocsub = pe.Node(util.Merge(len(preproc_output.outputs.__dict__)),
 flutil.get_output_substitutions(preproc, preproc_output, preprocsub)
 
 # Preproc node substitutions
-# NOTE: It would be nice if this were more intuitive, but I haven't
-# figured out a good way.  Have to hardcode the node names for now.
-preproc_mapnodes = ["art", "dilatemask", "highpass", "masksmoothfunc", "extractref", "tsmovie",
-                    "meanfunc3", "realign", "plotmean", "func2anat", "func2anatpng"]
-for plot in ["displacement", "rotation", "translation"]:
-    preproc_mapnodes.append("plot%s"%plot)
-for img in ["example", "mean"]:
-    preproc_mapnodes.append("%sslice"%img)
-preprocsinksubs = flutil.get_mapnode_substitutions(exp.nruns, preproc_mapnodes)
-
+preprocsinksubs = flutil.get_mapnode_substitutions(preproc, preproc_output, exp.nruns)
 
 flutil.set_substitutions(preproc, preprocsink, preprocsub, preprocsinksubs)
 
@@ -182,13 +173,11 @@ preproc_input.inputs.smooth_fwhm = smooth_fwhm
 # First-Level Model
 # =================
 
-# Moderate hack to strip deepcopy-offensive stuff from an experiment module
-# Fixes bug in Python(!)
-class Experiment(object): pass
-experiment = Experiment()
+# Turn the experiment module into a non-deepcopy offensive dictionary
+experiment = dict()
 for k,v in exp.__dict__.items():
     if not k.startswith("__") and not inspect.ismodule(v):
-        setattr(experiment, k, v)
+        experiment[k] = v
 
 # Model relevant functions
 def count_runs(runs):
@@ -201,15 +190,17 @@ def get_contrast_idx(contrast_name, contrasts, startat=0):
     """Return the index corresponding to the name of a contrast."""
     return [i for i, data in enumerate(contrasts, startat) if data[0] == contrast_name]
 
-def subjectinfo(info, exp):
+def subject_info_func(info, exp):
     """Return a subjectinfo list of bunches.  
+
+    In retrospect, this may be a dirty, dirty hack
 
     Parameters
     ----------
     info : list
         [subject_id, nruns]
-    exp : experiment object
-        Basically an experiment module stipped of deepcopy-offensive stuff
+    exp : experiment dictionary
+        Relevent info from experiment module
 
     """
     import os
@@ -224,7 +215,7 @@ def subjectinfo(info, exp):
         day = 1
     nruns = info[1]
     output = []
-    events = exp.events
+    events = exp['events']
     for r in range(nruns):
         run_number = r+1
         onsets = []
@@ -233,8 +224,8 @@ def subjectinfo(info, exp):
 
             # Get a path to the parfile for this event
             vars = locals()
-            arg_tuple = tuple([vars[arg] for arg in exp.parfile_args])
-            parfile = os.path.join(exp.parfile_base_dir, exp.parfile_template%arg_tuple)
+            arg_tuple = tuple([vars[arg] for arg in exp['parfile_args']])
+            parfile = os.path.join(exp['parfile_base_dir'], exp['parfile_template']%arg_tuple)
             
             # Get the event onsets and durations from the parfile
             o, d = flutil.parse_par_file(parfile)
@@ -245,13 +236,21 @@ def subjectinfo(info, exp):
                       Bunch(conditions=events,
                             onsets=deepcopy(onsets),
                             durations=deepcopy(durations),
-                            regressor_names=deepcopy(exp.events),
+                            regressor_names=deepcopy(exp['events']),
                             amplitudes=None,
                             tmod=None,
                             pmod=None,
                             regressors=None))
     return output
 
+expsource = pe.Node(util.IdentityInterface(fields=["experiment"]),
+                    name="expsource")
+expsource.inputs.experiment = experiment
+
+subjectinfo = pe.Node(util.Function(input_names=["info", "exp"],
+                                    output_names=["output"],
+                                    function=subject_info_func),
+                      name="subjectinfo")
 
 
 # Map space to smoothing
@@ -289,11 +288,7 @@ modelsub = pe.Node(util.Merge(len(model_output.outputs.__dict__)),
 flutil.get_output_substitutions(model, model_output, modelsub)
 
 # Model node substitutions
-# NOTE: It would be nice if this were more intuitive, but I haven't
-# figured out a good way.  Have to hardcode the node names for now.
-model_mapnodes = ["featmodel", "sliceresidual", "modelestimate", "slicestats"]
-
-modelsinksubs = flutil.get_mapnode_substitutions(exp.nruns, model_mapnodes)
+modelsinksubs = flutil.get_mapnode_substitutions(model, model_output, exp.nruns)
 
 modelsinksubs.append(("_contrast_","stats/"))
 
@@ -320,10 +315,14 @@ model.connect([
         [("subject_id", "in1")]),
     (modelsource, runinfo,
         [(("timeseries", count_runs), "in2")]),
-    (runinfo, model_input,
-        [(("out", subjectinfo, experiment), "subject_info")]),
+    (runinfo, subjectinfo,
+        [("out", "info")]),
+    (expsource, subjectinfo,
+        [("experiment", "exp")]),
+    (subjectinfo, model_input,
+        [("output", "subject_info")]),
     (connames, selectcontrast,
-        [(("contrast", get_contrast_idx, experiment.contrasts), "index")]),
+        [(("contrast", get_contrast_idx, exp.contrasts), "index")]),
     ])
 
 # Connect inputs
@@ -404,7 +403,7 @@ regsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
 registration.connect([
     (subjectsource, regsource,     [("subject_id", "subject_id")]),
     (imagesource,   regsource,     [("image", "image")]),
-    (connames,      regsource,     [(("contrast", get_contrast_idx, experiment.contrasts, 1), "contrast")]),
+    (connames,      regsource,     [(("contrast", get_contrast_idx, exp.contrasts, 1), "contrast")]),
     ])
 
 if space == "volume": 
@@ -429,10 +428,7 @@ if space == "volume":
     flutil.get_output_substitutions(registration, reg_output, regsinksub)
 
 # Registration node substitutions
-reg_mapnodes = ["applywarp", "surfproject", "surftransform",
-                "convertnormsurf","smoothnativesurf", "smoothnormsurf"]
-
-regsinksubs = flutil.get_mapnode_substitutions(exp.nruns, reg_mapnodes)
+regsinksubs = flutil.get_mapnode_substitutions(registration, reg_output, exp.nruns)
 regsinksubs.extend([("_image_cope", ""),
                     ("_image_varcope", ""),
                     ("_contrast_", ""),
