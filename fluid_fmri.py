@@ -437,14 +437,6 @@ regsinksubs.extend([("_image_cope", ""),
                     ("_out", ""),
                     ("_space_%s"%space,"")])
 
-"""
-def set_reg_subs(contrast):
-    
-    for c in get_contrast_idx(contrast):
-        c += 1
-        regsinksubs.extend([("cope%d"%c, "cope"), ("varcope%d"%c, "varcope")])
-    return regsinksubs
-"""
 
 for c, name in enumerate(exp.contrasts, 1):
     regsinksubs.extend([("cope%d"%c, "cope"), ("varcope%d"%c, "varcope")])
