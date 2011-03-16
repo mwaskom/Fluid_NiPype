@@ -112,10 +112,13 @@ for subject in subjects:
 
 def get_dicom_dir(subject):
     """Return the path to a dicom directory"""
-    return glob(os.path.join(datadir,subject,"dicom",args.type))[0]
+    from os.path import join as pjoin
+    from glob import glob
+    return glob(pjoin(datadir,subject,"dicom",args.type))[0]
 
 def is_moco(dcmfile):
     """Determine if a run has on-line motion correction"""
+    import subprocess
     cmd = ['mri_probedicom', '--i', dcmfile, '--t', '8', '103e']
     proc  = subprocess.Popen(cmd,
                              stdout=subprocess.PIPE,
@@ -125,6 +128,7 @@ def is_moco(dcmfile):
 
 def fieldmap_type(dcmfile):
     """Determine the type of a fieldmapping dicom"""
+    import subprocess
     cmd = ["mri_probedicom", "--i", dcmfile, "--t", "8", "8"]
     proc = subprocess.Popen(cmd,
                             stdout=subprocess.PIPE,
@@ -135,10 +139,13 @@ def fieldmap_type(dcmfile):
     elif stdout.strip()[-4] == "P":
         return "phase"
     else:
-        raise Exception("Could not determine fieldmap type of %s"%dcmfile)
+        raise TypeError("Could not determine fieldmap type of %s"%dcmfile)
 
 def parse_info_file(dcminfofile, writeflf=True):
     """Get information from the dicom info file about the runs"""
+    import os
+    from os.path import join as pjoin
+    import numpy as np
     infopath = dcminfofile.split("/")
     try:
         subject = [d.replace("_sid_","") for d in infopath if d.startswith("_sid_")][0]
@@ -173,7 +180,7 @@ def parse_info_file(dcminfofile, writeflf=True):
                     info.append(("structural",dcmfile,seqn, "%s-%s"%(pfix,name)))
                 elif name.startswith("field_mapping"):
                     fmaptype = fieldmap_type(
-                        os.path.join(datadir,subject,"dicom",args.type,dcmfile))
+                        pjoin(datadir,subject,"dicom",args.type,dcmfile))
                     if name == "field_mapping":
                         seqname = "func_%s_fm"%fmaptype
                     else:
@@ -185,7 +192,7 @@ def parse_info_file(dcminfofile, writeflf=True):
                     angle = int(name[18:-12])
                     info.append(("flash",dcmfile,seqn,"flash_%02d-rms"%angle))
                 elif ("ge_func" in name
-                      and not is_moco(os.path.join(datadir,subject,"dicom",args.type,dcmfile))):
+                      and not is_moco(pjoin(datadir,subject,"dicom",args.type,dcmfile))):
                     if (t==198) and name.startswith("NBack"):
                         info.append(("bold",dcmfile,seqn,name))
                     elif (t==248) and name.startswith("MOT_Block"):
@@ -200,7 +207,7 @@ def parse_info_file(dcminfofile, writeflf=True):
                         info.append(("bold",dcmfile,seqn,"Resting"))
                 elif (args.moco
                       and "ge_func" in name
-                      and is_moco(os.path.join(datadir,subject,"dicom",args.type,dcmfile))):
+                      and is_moco(pjoin(datadir,subject,"dicom",args.type,dcmfile))):
                     name = name.split("_")[0] + "-moco"
                     if (t==198) and name.startswith("NBack"):
                         info.append(("bold",dcmfile,seqn,name))
@@ -220,7 +227,7 @@ def parse_info_file(dcminfofile, writeflf=True):
     # Write files containing lists of the dicoms in each series to speed up mri_convert
     if writeflf:
         for seqinfo in info:
-            flfdir = os.path.join(datadir, subject, "unpack", "flf")
+            flfdir = pjoin(datadir, subject, "unpack", "flf")
             if not os.path.isdir(flfdir):
                 os.makedirs(flfdir)
             alldcms = glob(os.path.join(
@@ -254,7 +261,8 @@ def get_out_ftype(dcminfofile):
     
 def get_img_name(subj, seq, ftype):
     """Get the source file name"""    
-    return os.path.join(datadir, subj, "nifti/%s_seq_%02d.%s"%(args.type,int(seq),ftype))
+    from os.path import join as pjoin
+    return pjoin(datadir, subj, "nifti/%s_seq_%02d.%s"%(args.type,int(seq),ftype))
 
 
 # Unpacking pipeline 
@@ -362,7 +370,8 @@ unpack.config = dict(crashdump_dir=crashdir)
 
 # Run the pipeline
 if args.pype:
-    unpack.run(inseries=args.inseries)
+    #unpack.run(inseries=args.inseries)
+    unpack.run(plugin="linear")
 
 # Softlink heuristically 
 # ----------------------
@@ -421,7 +430,7 @@ for subj in subjects:
                         nrun = boldhash[par]
                         boldhash[par] += 1
                         trgfile = "%s_run%d%s.nii.gz"%(par,nrun,moco)
-                # Diffusion.  Not calling it DTI, to please Satra
+                # Diffusion.
                 elif type == "dwi":
                     src = get_img_name(subj, seqn, "nii.gz")
                     trgfile = "%s.nii.gz"%name
