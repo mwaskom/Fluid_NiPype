@@ -62,13 +62,6 @@ def get_fixedfx_workflow(name="fixed_fx", volume_report=True):
     outputnode = pe.Node(util.IdentityInterface(fields=outfields),
                          name="outputspec")
 
-    def get_dof_opstring(doffiles):
-        opstrings = []
-        for doffile in doffiles:
-            with open(doffile) as f:
-                dof = f.read().strip()
-                opstrings.append("-mul 0 -add %s -mas"%dof)
-        return opstrings
 
     fixed_fx.connect([
         (inputnode,    copemerge,     [("cope", "in_files")]),
@@ -81,7 +74,7 @@ def get_fixedfx_workflow(name="fixed_fx", volume_report=True):
         (varcopemerge, flameo,        [("merged_file","var_cope_file")]),
         (dofmerge,     flameo,        [("merged_file", "dof_var_cope_file")]),
         (inputnode,    flameo,        [("mask", "mask_file")]),
-        (inputnode,    level2model,   [(("cope", lambda x: len(x)), "num_copes")]),
+        (inputnode,    level2model,   [(("cope", get_length), "num_copes")]),
         (level2model,  flameo,        [("design_mat","design_file"),
                                        ("design_con","t_con_file"),
                                        ("design_grp","cov_split_file")]),
@@ -96,3 +89,16 @@ def get_fixedfx_workflow(name="fixed_fx", volume_report=True):
             ])
 
     return fixed_fx, inputnode, outputnode
+    
+
+def get_dof_opstring(doffiles):
+    """Generate an fslmaths opstring to fill a DOF volume."""
+    opstrings = []
+    for doffile in doffiles:
+        with open(doffile) as f:
+            dof = f.read().strip()
+            opstrings.append("-mul 0 -add %s -mas"%dof)
+    return opstrings
+
+def get_length(x):
+    return len(x)

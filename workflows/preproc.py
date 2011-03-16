@@ -5,7 +5,6 @@ See the docstring for get_workflow() for more information.
 """
 from warnings import warn
 
-import nibabel as nib
 import nipype.interfaces.fsl as fsl
 import nipype.interfaces.freesurfer as fs
 import nipype.interfaces.utility as util
@@ -143,18 +142,11 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
                            iterfield=["in_file", "mask_file"],
                            name = "maskfunc1")
 
-    # Define function for the first set of connections
-    def getmiddlevolume(func):
-        """Return the middle volume index."""
-        if not isinstance(func, list):
-            func = [func]
-        return [(nib.load(f).get_shape()[3]/2)-1 for f in func]
-
     # Connect the nodes for the first stage of preprocessing
     preproc.connect([
         (inputnode,  img2float,     [("timeseries", "in_file")]),
         (img2float,  extractref,    [("out_file", "in_file"), 
-                                    (("out_file", getmiddlevolume), "t_min")]),
+                                    (("out_file", get_middle_volume), "t_min")]),
         (extractref, exampleslice,  [("roi_file", "in_file")]),
         (img2float,  realign,       [("out_file", "in_file")]),
         (extractref, realign,       [("roi_file", "ref_file")]),
@@ -253,15 +245,10 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
                            iterfield=["in_file"],
                            name="meanfunc2")
 
-    # Define a function for the second set of connections
-    def getthreshop(thresh):
-        """Return an fslmaths op string to get10% of the intensity"""
-        return "-thr %.10f -Tmin -bin"%(0.1*thresh[0][1])
-
     # Connect the pipeline up through the new masked runs
     preproc.connect([
         (maskfunc1,  getthresh,  [("out_file", "in_file")]),
-        (getthresh,  threshold,  [(("out_stat", getthreshop), "op_string")]),
+        (getthresh,  threshold,  [(("out_stat", get_thresh_op), "op_string")]),
         (maskfunc1,  threshold,  [("out_file", "in_file")]),
         (realign,    medianval,  [("out_file", "in_file")]),
         (threshold,  medianval,  [("out_file", "mask_file")]),
@@ -327,21 +314,11 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
                             iterfield = ["in_file", "mask_file"],
                             name="medianval2")
 
-
-    # Functions to get fslmaths op strings
-    def getmedianscaleop(medianvals):
-        """Get an fslmaths op string for intensity normalization."""
-        return ["-mul %.10f"%(10000./val) for val in medianvals]
-
-    def gethpfop(cutoff):
-        """Get an fslmaths op string for high-pass filtering given a cutoff in TRs."""
-        return "-bptf %d -1"%(cutoff/2)
-
     # Make connections to the intensity normalization and temporal filtering
     preproc.connect([
         (maskfunc2,   medianscale,  [("out_file", "in_file")]),
-        (medianval,   medianscale,  [(("out_stat", lambda x: [10000./i for i in x]), "operand_value")]),
-        (inputnode,   highpass,     [(("hpf_cutoff", lambda x: x/2), "highpass_sigma")]),
+        (medianval,   medianscale,  [(("out_stat", get_scale_value), "operand_value")]),
+        (inputnode,   highpass,     [(("hpf_cutoff", divide_by_two), "highpass_sigma")]),
         (medianscale, highpass,     [("out_file", "in_file")]),
         (highpass,    meanfunc3,    [("out_file", "in_file")]),
         (meanfunc3,   meanslice,    [("out_file", "in_file")]),
@@ -362,23 +339,14 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
     masksmoothfunc = pe.MapNode(fsl.ApplyMask(),
                                 iterfield=["in_file","mask_file"],
                                 name="masksmoothfunc")
-    # SUSAN functions
-    def getbtthresh(medianvals):
-        """Get the brightness threshold for SUSAN."""
-        return [0.75*val for val in medianvals]
-
-    def getusans(inlist):
-        """Return the usans at the right threshold."""
-        return [[tuple([val[0],0.75*val[1]])] for val in inlist]
-
     # Make the smoothing connections
     preproc.connect([
         (meanfunc3,  mergenode,      [("out_file", "in1")]),
         (medianval2, mergenode,      [("out_stat", "in2")]),
         (highpass,   smooth,         [("out_file", "in_file")]),
         (inputnode,  smooth,         [("smooth_fwhm", "fwhm")]),
-        (medianval2, smooth,         [(("out_stat", getbtthresh), "brightness_threshold")]),
-        (mergenode,  smooth,         [(("out", getusans), "usans")]),
+        (medianval2, smooth,         [(("out_stat", get_bright_thresh), "brightness_threshold")]),
+        (mergenode,  smooth,         [(("out", get_usans), "usans")]),
         (smooth,     masksmoothfunc, [("smoothed_file", "in_file")]),
         (dilatemask, masksmoothfunc, [("out_file", "mask_file")]),
         ])
@@ -439,7 +407,6 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
                      "mean_func",
                      "functional_mask",
                      "realignment_parameters",
-                     "outlier_files",
                      "timeseries_movie",
                      "example_func_slices",
                      "mean_func_slices",
@@ -466,7 +433,6 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
         (meanfunc3,      outputnode, [("out_file", "mean_func")]),
         (dilatemask,     outputnode, [("out_file", "functional_mask")]),
         (realign,        outputnode, [("par_file", "realignment_parameters")]),
-        (art,            outputnode, [("outlier_files", "outlier_files")]),
         (art,            outputnode, [("outlier_files", "outlier_volumes")]),
         (tsmovie,        outputnode, [("out_file", "timeseries_movie")]),
         (plotmean,       outputnode, [("out_file", "intensity_plot")]),
@@ -486,3 +452,30 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
             ])
 
     return preproc, inputnode, outputnode
+
+# Connecting functions
+# --------------------
+
+def get_middle_volume(func):
+    """Return the middle volume index."""
+    import nibabel
+    return [(nibabel.load(f).get_shape()[3]/2)-1 for f in func]
+
+def get_thresh_op(thresh):
+    """Return an fslmaths op string to get10% of the intensity"""
+    return "-thr %.10f -Tmin -bin"%(0.1*thresh[0][1])
+
+def get_scale_value(medianvals):
+    """Get the scale value to set the grand mean of the timeseries ~10000.""" 
+    return [10000./val for val in medianvals]
+
+def get_bright_thresh(medianvals):
+    """Get the brightness threshold for SUSAN."""
+    return [0.75*val for val in medianvals]
+
+def get_usans(inlist):
+    """Return the usans at the right threshold."""
+    return [[tuple([val[0],0.75*val[1]])] for val in inlist]
+
+def divide_by_two(x):
+    return float(x)/2

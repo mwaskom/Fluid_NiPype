@@ -5,15 +5,13 @@ Main interface for GFluid fMRI Nipype code.
 import os
 import argparse
 import inspect
-from copy import deepcopy
 from tempfile import mkdtemp
 from os.path import join as pjoin
 
 import nipype.pipeline.engine as pe
 import nipype.interfaces.io as nio
-from nipype.interfaces import fsl, freesurfer
+from nipype.interfaces import fsl
 import nipype.interfaces.utility as util
-from nipype.interfaces.base import Bunch
 
 from workflows.preproc import get_preproc_workflow
 from workflows.fsl_model import get_model_workflow
@@ -37,8 +35,8 @@ parser.add_argument("-surface", action="store_true",
                     help="run processing for surface analysis")
 parser.add_argument("-norun",dest="run",action="store_false",
                     help="do not run the pypeline")
-parser.add_argument("-inseries",action="store_true",
-                    help="force running in series")
+parser.add_argument("-ipython",action="store_true",
+                    help="run in parallel using IPython")
 parser.add_argument("-tempdir",action="store_true",
                     help="write all output to temporary directory")
 args = parser.parse_args()
@@ -199,9 +197,9 @@ def count_runs(runs):
         runs = [runs]
     return len(runs)
 
-def get_contrast_idx(contrast_name):
+def get_contrast_idx(contrast_name, contrasts, startat=0):
     """Return the index corresponding to the name of a contrast."""
-    return [i for i, data in enumerate(exp.contrasts) if data[0] == contrast_name]
+    return [i for i, data in enumerate(contrasts, startat) if data[0] == contrast_name]
 
 def subjectinfo(info, exp):
     """Return a subjectinfo list of bunches.  
@@ -214,6 +212,11 @@ def subjectinfo(info, exp):
         Basically an experiment module stipped of deepcopy-offensive stuff
 
     """
+    import os
+    from copy import deepcopy
+    from nipype.interfaces.base import Bunch
+    import fluid_utility as flutil
+
     subject_id = info[0]
     if subject_id.endswith("p"):
         day = 2
@@ -270,7 +273,7 @@ modelsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
 modelsource.inputs.template = os.path.join(analysis_dir, "%s/%s/run_?/%s")
 
 modelsource.inputs.template_args = dict(
-    outlier_files=[["subject_id", "preproc", "outlier_files.txt"]],
+    outlier_files=[["subject_id", "preproc", "outlier_volumes.txt"]],
     realignment_parameters=[["subject_id", "preproc", "realignment_parameters.par"]],
     overlay_background=[["subject_id", "preproc", "example_func.nii.gz"]],
     timeseries=[["subject_id", "preproc", "%s_timeseries.nii.gz"%spacedict[space]]])
@@ -320,7 +323,7 @@ model.connect([
     (runinfo, model_input,
         [(("out", subjectinfo, experiment), "subject_info")]),
     (connames, selectcontrast,
-        [(("contrast", get_contrast_idx), "index")]),
+        [(("contrast", get_contrast_idx, experiment.contrasts), "index")]),
     ])
 
 # Connect inputs
@@ -401,7 +404,7 @@ regsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
 registration.connect([
     (subjectsource, regsource,     [("subject_id", "subject_id")]),
     (imagesource,   regsource,     [("image", "image")]),
-    (connames,      regsource,     [(("contrast", lambda x: [i+1 for i in get_contrast_idx(x)]), "contrast")]),
+    (connames,      regsource,     [(("contrast", get_contrast_idx, experiment.contrasts, 1), "contrast")]),
     ])
 
 if space == "volume": 
@@ -447,7 +450,7 @@ def set_reg_subs(contrast):
     return regsinksubs
 """
 
-for c, name in enumerate(exp.contrasts):
+for c, name in enumerate(exp.contrasts, 1):
     regsinksubs.extend([("cope%d"%c, "cope"), ("varcope%d"%c, "varcope")])
 regsinksubs.reverse()
 regsink.inputs.substitutions = regsinksubs
@@ -579,12 +582,15 @@ def report():
         
 def workflow_runner(wf, stem):
     if any([arg for arg in args.workflows if arg.startswith(stem)]) or "all" in args.workflows:
-        wf.run(inseries=args.inseries)
+        if args.ipython:
+            wf.run(plugin="IPython")
+        else:
+            wf.run(plugin="Linear")
         report()
 
 if __name__ == "__main__":
     if args.run:
         workflow_runner(preproc, "preproc")
-        workflow_runner(model, "model") 
+        workflow_runner(model, "model")
         workflow_runner(registration, "reg")
-        workflow_runner(fixed_fx, "ffx")        
+        workflow_runner(fixed_fx, "ffx")

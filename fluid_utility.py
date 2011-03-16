@@ -1,6 +1,4 @@
-import os
 from datetime import datetime
-from nipype.utils.filemanip import split_filename
 
 def subject_container(workflow, subjectsource, datasinknode, stripstring=None):
     
@@ -10,11 +8,17 @@ def subject_container(workflow, subjectsource, datasinknode, stripstring=None):
     workflow.connect([
         (subjectsource, datasinknode, 
             [("subject_id", "container"),
-            (("subject_id", lambda x: "".join([stripstring,x])), "strip_dir")]),
+            (("subject_id", join_strings, stripstring), "strip_dir")]),
             ])
+
+def join_strings(x, y):
+    return "".join([y, x])
+
 
 def substitute(origpath, subname):
     """Generate a list of substitution tuples."""
+    import os
+    from nipype.utils.filemanip import split_filename
     if not isinstance(origpath, list):
         origpath = [origpath]
     substitutes = []
@@ -95,6 +99,7 @@ def sink_outputs(workflow, outputnode, datasinknode, pathstr):
 
 def archive_crashdumps(workflow):
     """Archive crashdumps by date to Nipype_Code directory"""
+    import os
     datestamp = str(datetime.now())[:10]
     codepath = os.path.split(os.path.abspath(__file__))[0]
     crashdir = os.path.abspath("%s/crashdumps/%s" % (codepath, datestamp))

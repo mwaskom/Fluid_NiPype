@@ -1,4 +1,3 @@
-import os
 from nipype.algorithms import  modelgen
 from nipype.interfaces import fsl
 import nipype.interfaces.utility as util
@@ -32,7 +31,7 @@ def get_model_workflow(name="model"):
     # Use model information to create fsf files
     featmodel = pe.MapNode(fsl.FEATModel(), 
                           overwrite = False,
-                          iterfield = ["fsf_file"],
+                          iterfield = ["fsf_file","ev_files"],
                           name="featmodel")
 
     # Use film_gls to estimate the model
@@ -89,35 +88,6 @@ def get_model_workflow(name="model"):
                          name="outputspec")
 
 
-    def con_sort(files):
-        """Take a list, sort it, and return it."""
-        files.sort()
-        return files
-
-    def get_sampling_rate(bg_image):
-        """Sample overlay images every 2 slices if in MNI space, otherwise show every slice."""
-        if isinstance(bg_image, list):
-            bg_image = bg_image[0]
-        try:
-            # This heurstic is not perfect, but will do for us
-            if bg_image.startswith(os.environ["FSLDIR"]):
-                return 2
-        except KeyError:
-            return 1
-        return 1
-
-    def get_image_width(bg_image):
-        """Set the image width of the slicer png based on what space the background image is in."""
-        if isinstance(bg_image, list):
-            bg_image = bg_image[0]
-        try:
-            # This heurstic is not perfect, but will do for us
-            if bg_image.startswith(os.environ["FSLDIR"]):
-                return 872
-        except KeyError:
-            return 750
-        return 750
-
 
     # Connect up the model workflow
     model.connect([
@@ -134,14 +104,15 @@ def get_model_workflow(name="model"):
                                                 ("HRF_bases", "bases")]),
         (inputnode,         modelestimate,     [("timeseries", "in_file")]),
         (modelspec,         level1design,      [("session_info","session_info")]),
-        (level1design,      featmodel,         [("fsf_files","fsf_file")]),
+        (level1design,      featmodel,         [("fsf_files","fsf_file"),
+                                                ("ev_files", "ev_files")]),
         (featmodel,         modelestimate,     [("design_file","design_file")]),
         (featmodel,         contrastestimate,  [("con_file","tcon_file")]),
         (contrastestimate,  selectcontrast,    [(("zstats", con_sort),"inlist")]),
         (modelestimate,     threshres,         [("sigmasquareds","in_file")]),
         (inputnode,         overlayres,        [("overlay_background", "background_image")]),
         (modelestimate,     overlayres,        [("sigmasquareds","stat_image")]),
-        (threshres,         overlayres,        [(("out_stat", lambda x: [tuple(i) for i in x]), "stat_thresh")]),
+        (threshres,         overlayres,        [(("out_stat", make_tuple), "stat_thresh")]),
         (inputnode,         sliceres,          [(("overlay_background", get_sampling_rate), "sample_axial"),
                                                 (("overlay_background", get_image_width), "image_width")]),
         (overlayres,        sliceres,          [("out_file", "in_file")]),
@@ -159,3 +130,38 @@ def get_model_workflow(name="model"):
         ])
 
     return model, inputnode, outputnode
+
+
+def con_sort(files):
+    """Take a list, sort it, and return it."""
+    files.sort()
+    return files
+
+def get_sampling_rate(bg_image):
+    """Sample overlay images every 2 slices if in MNI space, otherwise show every slice."""
+    import os
+    if isinstance(bg_image, list):
+        bg_image = bg_image[0]
+    try:
+        # This heurstic is not perfect, but will do for us
+        if bg_image.startswith(os.environ["FSLDIR"]):
+            return 2
+    except KeyError:
+        return 1
+    return 1
+
+def get_image_width(bg_image):
+    """Set the image width of the slicer png based on what space the background image is in."""
+    import os
+    if isinstance(bg_image, list):
+        bg_image = bg_image[0]
+    try:
+        # This heurstic is not perfect, but will do for us
+        if bg_image.startswith(os.environ["FSLDIR"]):
+            return 872
+    except KeyError:
+        return 750
+    return 750
+
+def make_tuple(x):
+    return [tuple(i) for i in x]
