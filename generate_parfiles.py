@@ -82,7 +82,7 @@ def gen_mot(matfiletemplate, day, subject, srcdir, trgdir):
             D = scio.loadmat(matfile, struct_as_record=False, squeeze_me=True)["D"]
             runtype = {129:"Block",193:"Jitter"}[len(D.actualEventStartTime)]
             for speed in range(1,5):
-                parfile = os.path.join(trgdir, "MOT_%s_r1_d1_speed%d_%s.txt"%(runtype,speed,subject))
+                parfile = os.path.join(trgdir, "MOT_%s_r1_d%d_speed%d_%s.txt"%(runtype, day, speed,subject))
                 print "   Writing %s"%parfile
                 fid = open(parfile,"w")
                 for i, time in enumerate(D.actualEventStartTime):
@@ -101,6 +101,27 @@ def gen_mot(matfiletemplate, day, subject, srcdir, trgdir):
                     then = D.actualEventStartTime[i+1]
                     fid.write("%.2f\t%.2f\t1\n"%(now, then-now))
             fid.close()
+            # Write the parametric parfile
+            speedparfile = os.path.join(trgdir, "MOT_%s_r1_d%r_parametric_speed_%s.txt"%(runtype, day, subject))
+            speedfid = open(speedparfile, "w")
+            levelparfile = os.path.join(trgdir, "MOT_%s_r1_d%d_parametric_level_%s.txt"%(runtype, day, subject))
+            levelfid = open(levelparfile, "w")
+            taskparfile = os.path.join(trgdir, "MOT_%s_r1_d%d_task_%s.txt"%(runtype, day, subject))
+            taskfid = open(taskparfile, "w")
+            print "   Writing %s"%speedparfile
+            print "   Writing %s"%levelparfile
+            print "   Writing %s"%taskparfile
+            for i, time in enumerate(D.actualEventStartTime):
+                if D.eventType[i] == 3:
+                    now = D.actualEventStartTime[i]
+                    then = D.actualEventStartTime[i+2]
+                    speed = D.speed[i]
+                    level = D.eventCond[i]
+                    speedfid.write("%.2f\t%.2f\t%.2f\n"%(now, then-now, speed))
+                    levelfid.write("%.2f\t%.2f\t%.2f\n"%(now, then-now, level))
+                    taskfid.write("%.2f\t%.2f\t1\n"%(now, then-now))
+            speedfid.close()
+            levelfid.close()
 
         # Catch the error from the missing .mat file
         except IOError:
@@ -132,6 +153,8 @@ def gen_iq(matfiletemplate, day, subject, srcdir, trgdir):
             print "ERROR: could not read %s"%matfile
         else:
             raise
+    except IndexError:
+        print "ERROR generating IQ parfiles"
 
 def gen_rt(matfiletemplate, subject, srcdir, trgdir):
     print "\nRT\n======="
@@ -177,7 +200,7 @@ def gen_rt(matfiletemplate, subject, srcdir, trgdir):
             if not os.path.exists(matfile):
                 print "ERROR: could not read %s"%matfile
             else:
-                raise error
+                raise 
 
 if __name__ == "__main__":
     # Get subject from first command line arg

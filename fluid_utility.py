@@ -114,9 +114,11 @@ def archive_crashdumps(workflow):
 def parse_par_file(parfile):
     onsets = []
     durations = []
+    amplitudes = []
     for line in open(parfile):
         line = line.split()
         onsets.append(float(line[0]))
         durations.append(float(line[1]))
-    return onsets, durations
+        amplitudes.append(float(line[2]))
+    return onsets, durations, amplitudes
 
