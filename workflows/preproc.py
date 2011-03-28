@@ -13,6 +13,7 @@ import nipype.pipeline.engine as pe
 import nipype.algorithms.rapidart as ra
 
 from .interfaces import TimeSeriesMovie
+from .utility import OutputConnector
 
 def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True, b0_unwarp=False):
     """Return a preprocessing workflow.
@@ -34,7 +35,7 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
         - Timeseries (image files)
         - Highpass filter cutoff (in TRs)
         - FWHM of smoothing kernel for SUSAN (in mms)
-    
+ 
     If anatomical registration is set to True (as it is by default), the following input must be added
         - Freesurfer Subject ID
 
@@ -416,7 +417,7 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
                      "translation_plot",
                      "displacement_plot"]
     if anat_reg:
-        output_fields.extend(["func2anat_cost",
+        output_fields.extend(["func2anat", # ends up as .mincost file
                               "func2anat_flirt",
                               "func2anat_tkreg",
                               "func2anat_slices",
@@ -425,31 +426,31 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
     outputnode = pe.Node(util.IdentityInterface(fields=output_fields),
                          name="outputspec")
 
-    # Make connections to the output node
-    preproc.connect([
-        (highpass,       outputnode, [("out_file", "unsmoothed_timeseries")]),
-        (masksmoothfunc, outputnode, [("out_file", "smoothed_timeseries")]),
-        (extractref,     outputnode, [("roi_file", "example_func")]),
-        (meanfunc3,      outputnode, [("out_file", "mean_func")]),
-        (dilatemask,     outputnode, [("out_file", "functional_mask")]),
-        (realign,        outputnode, [("par_file", "realignment_parameters")]),
-        (art,            outputnode, [("outlier_files", "outlier_volumes")]),
-        (tsmovie,        outputnode, [("out_file", "timeseries_movie")]),
-        (plotmean,       outputnode, [("out_file", "intensity_plot")]),
-        (exampleslice,   outputnode, [("out_file", "example_func_slices")]),
-        (meanslice,      outputnode, [("out_file", "mean_func_slices")]),
-        (plotrot,        outputnode, [("out_file", "rotation_plot")]),
-        (plottrans,      outputnode, [("out_file", "translation_plot")]),
-        (plotdisp,       outputnode, [("out_file", "displacement_plot")]),
-        ])
+    # Use a utility class (defined in utility module) to control renaming 
+    # and connections to the output node
+    rename = OutputConnector(preproc, outputnode)
+
+    rename.connect(highpass,       "unsmoothed_timeseries")
+    rename.connect(masksmoothfunc, "smoothed_timeseries")
+    rename.connect(extractref,     "example_func", "roi_file")
+    rename.connect(meanfunc3,      "mean_func")
+    rename.connect(dilatemask,     "functional_mask")
+    rename.connect(realign,        "realignment_parameters", "par_file")
+    rename.connect(art,            "outlier_volumes", "outlier_files")
+    rename.connect(tsmovie,        "timeseries_movie")
+    rename.connect(plotmean,       "intensity_plot")
+    rename.connect(plotrot,        "rotation_plot")
+    rename.connect(plottrans,      "translation_plot")
+    rename.connect(plotdisp,       "displacement_plot")
+    rename.connect(exampleslice,   "example_func_slices")
+    rename.connect(meanslice,      "mean_func_slices")
+
     
     if anat_reg:
-        preproc.connect([
-            (func2anatpng, outputnode, [("out_file", "func2anat_slices")]),
-            (func2anat,    outputnode, [("min_cost_file", "func2anat_cost")]),
-            (func2anat,    outputnode, [("out_reg_file", "func2anat_tkreg")]),
-            (func2anat,    outputnode, [("out_fsl_file", "func2anat_flirt")]),
-            ])
+        rename.connect(func2anatpng, "func2anat_slices")
+        rename.connect(func2anat,    "func2anat", "min_cost_file")
+        rename.connect(func2anat,    "func2anat_tkreg", "out_reg_file")
+        rename.connect(func2anat,    "func2anat_flirt", "out_fsl_file")
 
     return preproc, inputnode, outputnode
 
@@ -479,3 +480,4 @@ def get_usans(inlist):
 
 def divide_by_two(x):
     return float(x)/2
+

@@ -64,7 +64,10 @@ if args.workflows is None:
 # - Subject list defined in experiment module
 # - Default subject list, with exclusions from experiment module
 if args.subjects is not None:
-    subject_list = args.subjects
+    if os.path.isfile(args.subjects[0]):
+        subject_list = open(args.subjects[0]).read().strip().split()
+    else:
+        subject_list = args.subjects
 elif hasattr(exp, "subject_list"):
     subject_list = exp.subject_list
 else:
@@ -109,6 +112,7 @@ else:
 # -------------------
 subjectsource = pe.Node(util.IdentityInterface(fields=["subject_id"]),
                         iterables = ("subject_id", subject_list),
+                        overwrite=True,
                         name = "subjectsource")
 
 # Preprocessing
@@ -131,20 +135,13 @@ preprocsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
 
 preprocsource.inputs.template_args = exp.template_args
 
-# Preproc Datasink nodes
-preprocsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
-                      name="preprocsink")
-
-# Preproc filename substitutions
-preprocsub = pe.Node(util.Merge(len(preproc_output.outputs.__dict__)),
-                         name="preprocsinksub")
-
-flutil.get_output_substitutions(preproc, preproc_output, preprocsub)
-
 # Preproc node substitutions
 preprocsinksubs = flutil.get_mapnode_substitutions(preproc, preproc_output, exp.nruns)
 
-flutil.set_substitutions(preproc, preprocsink, preprocsub, preprocsinksubs)
+# Preproc Datasink nodes
+preprocsink = pe.Node(nio.DataSink(base_directory=analysis_dir,
+                                   substitutions=preprocsinksubs),
+                      name="preprocsink")
 
 # Preproc connections
 preproc.connect(subjectsource, "subject_id", preprocsource, "subject_id")
@@ -190,15 +187,17 @@ def get_contrast_idx(contrast_name, contrasts, startat=0):
     """Return the index corresponding to the name of a contrast."""
     return [i for i, data in enumerate(contrasts, startat) if data[0] == contrast_name]
 
-def subject_info_func(info, exp):
+def subject_info_func(subject_id, nruns, exp):
     """Return a subjectinfo list of bunches.  
 
     In retrospect, this may be a dirty, dirty hack
 
     Parameters
     ----------
-    info : list
-        [subject_id, nruns]
+    subject_id : string
+        Subject ID
+    nruns : int
+        Number of runs being analyzed
     exp : experiment dictionary
         Relevent info from experiment module
 
@@ -208,18 +207,17 @@ def subject_info_func(info, exp):
     from nipype.interfaces.base import Bunch
     import fluid_utility as flutil
 
-    subject_id = info[0]
     if subject_id.endswith("p"):
         day = 2
     else:
         day = 1
-    nruns = info[1]
     output = []
     events = exp['events']
     for r in range(nruns):
         run_number = r+1
         onsets = []
-        durations = []        
+        durations = []
+        amplitudes = []
         for event in events:
 
             # Get a path to the parfile for this event
@@ -228,26 +226,23 @@ def subject_info_func(info, exp):
             parfile = os.path.join(exp['parfile_base_dir'], exp['parfile_template']%arg_tuple)
             
             # Get the event onsets and durations from the parfile
-            o, d = flutil.parse_par_file(parfile)
+            o, d, a = flutil.parse_par_file(parfile)
             onsets.append(o)
             durations.append(d)
+            amplitudes.append(a)
 
         output.insert(r,
                       Bunch(conditions=events,
                             onsets=deepcopy(onsets),
                             durations=deepcopy(durations),
-                            regressor_names=deepcopy(exp['events']),
-                            amplitudes=None,
-                            tmod=None,
-                            pmod=None,
-                            regressors=None))
+                            amplitudes=deepcopy(amplitudes)))
     return output
 
 expsource = pe.Node(util.IdentityInterface(fields=["experiment"]),
                     name="expsource")
 expsource.inputs.experiment = experiment
 
-subjectinfo = pe.Node(util.Function(input_names=["info", "exp"],
+subjectinfo = pe.Node(util.Function(input_names=["subject_id", "nruns", "exp"],
                                     output_names=["output"],
                                     function=subject_info_func),
                       name="subjectinfo")
@@ -278,21 +273,15 @@ modelsource.inputs.template_args = dict(
     timeseries=[["subject_id", "preproc", "%s_timeseries.nii.gz"%spacedict[space]]])
 
 
-# Model Datasink nodes
-modelsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
-                  name="modelsink")
-
-modelsub = pe.Node(util.Merge(len(model_output.outputs.__dict__)),
-                   name="modelsinksub")
-
-flutil.get_output_substitutions(model, model_output, modelsub)
-
 # Model node substitutions
 modelsinksubs = flutil.get_mapnode_substitutions(model, model_output, exp.nruns)
-
 modelsinksubs.append(("_contrast_","stats/"))
 
-flutil.set_substitutions(model, modelsink, modelsub, modelsinksubs)
+# Model Datasink node
+modelsink = pe.Node(nio.DataSink(base_directory=analysis_dir,
+                                 substitutions=modelsinksubs),
+                  name="modelsink")
+
 
 # Define a node to seed the contrasts iterables with the contrast name
 connames = pe.Node(util.IdentityInterface(fields=["contrast"]),
@@ -302,21 +291,14 @@ connames = pe.Node(util.IdentityInterface(fields=["contrast"]),
 # Get a reference to the selectcontrast node
 selectcontrast = model.get_node("selectcontrast")
 
-# Define a node to count the number of functional runs
-# and merge that with the subject_id to pass to the 
-# subjectinfo function
-runinfo = pe.Node(util.Merge(2), name="runinfo")
-
 # Model connections
 model.connect([
     (subjectsource, modelsource,  
         [("subject_id", "subject_id")]),
-    (subjectsource, runinfo,
-        [("subject_id", "in1")]),
-    (modelsource, runinfo,
-        [(("timeseries", count_runs), "in2")]),
-    (runinfo, subjectinfo,
-        [("out", "info")]),
+    (subjectsource, subjectinfo,
+        [("subject_id", "subject_id")]),
+    (modelsource, subjectinfo,
+        [(("timeseries", count_runs), "nruns")]),
     (expsource, subjectinfo,
         [("experiment", "exp")]),
     (subjectinfo, model_input,
@@ -357,10 +339,8 @@ definespace = pe.Node(util.IdentityInterface(fields=["space"]),
                       name="definespace")
 
 # Get registration input and output
-if space == "volume":
-    registration, reg_input, reg_output = get_registration_workflow(volume=True)
-elif space == "surface":
-    registration, reg_input, reg_output = get_registration_workflow(surface=True)
+getspace = {space:True}
+registration, reg_input, reg_output = get_registration_workflow(**getspace)
 
 imagesource = pe.Node(util.IdentityInterface(fields=["image"]),
                       iterables=("image", ["cope", "varcope"]),
@@ -419,13 +399,6 @@ elif space == "surface":
                                     ("tkreg_affine", "tkreg_affine")]),
         (subjectsource, reg_input, [("subject_id", "subject_id")]),
          ])
-
-# Registration filename substitutions
-regsinksub = pe.Node(util.Merge(len(reg_output.outputs.__dict__)),
-                     name="regsinksub")
-
-if space == "volume":
-    flutil.get_output_substitutions(registration, reg_output, regsinksub)
 
 # Registration node substitutions
 regsinksubs = flutil.get_mapnode_substitutions(registration, reg_output, exp.nruns)
@@ -536,16 +509,11 @@ elif space == "surface":
 ffxsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
                   name="ffxsink")
 
-# Fixed effects filename substitutions
-ffxsinksub = pe.Node(util.Merge(len(ffx_output.outputs.__dict__)),
-                     name="ffxsinksub")
+ffxsink.inputs.substitutions = [("_contrast_", ""), 
+                                ("_hemi_",""),
+                                ("_space_%s"%space,""),
+                                ("_rename_zstat0","")]
 
-flutil.get_output_substitutions(fixed_fx, ffx_output, ffxsinksub)
-
-# Fixed effects node substitutions
-flutil.set_substitutions(fixed_fx, ffxsink, ffxsinksub, [("_contrast_", ""), 
-                                                         ("_hemi_",""),
-                                                         ("_space_%s"%space,"")])
 
 # Set up the subject containers
 flutil.subject_container(fixed_fx, subjectsource, ffxsink)

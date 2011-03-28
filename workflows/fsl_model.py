@@ -3,6 +3,8 @@ from nipype.interfaces import fsl
 import nipype.interfaces.utility as util
 import nipype.pipeline.engine as pe
 
+from .utility import OutputConnector
+
 def get_model_workflow(name="model"):
 
     # Model Workflow Definition
@@ -21,7 +23,7 @@ def get_model_workflow(name="model"):
                         name="inputspec")
 
     # Generate Nipype-style model information
-    modelspec = pe.Node(modelgen.SpecifyModel(concatenate_runs=False),
+    modelspec = pe.Node(modelgen.SpecifyModel(),
                         name="modelspec")
 
     # Generate FSL-style model information
@@ -94,7 +96,6 @@ def get_model_workflow(name="model"):
         (inputnode,         modelspec,         [("subject_info", "subject_info"),
                                                 ("TR", "time_repetition"),
                                                 ("units", "input_units"),
-                                                ("units", "output_units"),
                                                 ("hpf_cutoff", "high_pass_filter_cutoff"),
                                                 ("timeseries", "functional_runs"),
                                                 ("outlier_files", "outlier_files"),
@@ -123,11 +124,16 @@ def get_model_workflow(name="model"):
         (inputnode,         slicestats,        [(("overlay_background", get_sampling_rate), "sample_axial"),
                                                 (("overlay_background", get_image_width), "image_width")]),
         (modelestimate,     outputnode,        [("results_dir", "results")]),
-        (featmodel,         outputnode,        [("design_image", "design_image"),
-                                                ("design_cov", "design_covariance")]),
-        (sliceres,          outputnode,        [("out_file", "sigmasquareds")]),
-        (slicestats,        outputnode,        [("out_file", "zstat")]),
         ])
+
+    # Use a utility class (defined in utility module) to control renaming 
+    # and connections to the output node
+    rename = OutputConnector(model, outputnode)
+    
+    rename.connect(featmodel, "design_image", "design_image")
+    rename.connect(featmodel, "design_covariance", "design_cov")
+    rename.connect(sliceres,  "sigmasquareds")
+    rename.connect(slicestats, "zstat")
 
     return model, inputnode, outputnode
 

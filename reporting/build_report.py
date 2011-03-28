@@ -16,7 +16,7 @@ ANALYSIS_DIR = "/mindhive/gablab/fluid/Analysis/Nipype"
 REPORT_DIR = "/mindhive/gablab/fluid/Analysis/Report"
 STAGES = ["behavioral", "timeseries", "preproc", "registration" ,"model", "stats", "fixed_effects"]
 FUNC_RUNS = dict(iq=1,nback=4,mot_block=1,mot_jitter=1,resting=1)
-PARADIGM_MAP = dict(iq="IQ",nback="NBack",mot_block="MOT_Block",mot_jitter="MOT_Jitter",resting="Resting")
+PARADIGM_MAP = dict(iq="IQ",nback="NBack",mot_block="MOT_Block",mot_jitter="MOT_Jitter",resting="Resting",mot_jitter_speed="MOT_Jitter")
 
 def main():
 
@@ -344,7 +344,7 @@ def write_registration_report(html, subj, paradigm):
 
         srcdir = os.path.join(ANALYSIS_DIR, paradigm, subj, "preproc", "run_%d"%r)
         
-        costfile = os.path.join(srcdir, "func2anat_tkreg.dat.mincost")
+        costfile = os.path.join(srcdir, "func2anat.mincost")
         try:
             cost = open(costfile).read().split()[0]
             html.write_text("Final boundary-based registration cost value: %s"%cost)

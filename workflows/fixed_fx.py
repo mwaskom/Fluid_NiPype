@@ -2,6 +2,8 @@ import nipype.interfaces.fsl as fsl
 import nipype.interfaces.utility as util
 import nipype.pipeline.engine as pe
 
+from .utility import OutputConnector
+
 
 def get_fixedfx_workflow(name="fixed_fx", volume_report=True):
 
@@ -85,10 +87,14 @@ def get_fixedfx_workflow(name="fixed_fx", volume_report=True):
         fixed_fx.connect([
             (flameo,       overlayflame,  [("zstats","stat_image")]),
             (overlayflame, sliceflame,    [("out_file", "in_file")]),
-            (sliceflame,   outputnode,    [("out_file", "zstat")]),
             ])
-
-    return fixed_fx, inputnode, outputnode
+    
+        # Use a utility class (defined in utility module) to control renaming 
+        # and connections to the output node
+        rename = OutputConnector(fixed_fx, outputnode)
+        rename.connect(sliceflame, "zstat")
+        
+        return fixed_fx, inputnode, outputnode
     
 
 def get_dof_opstring(doffiles):
