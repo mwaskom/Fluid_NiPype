@@ -48,13 +48,14 @@ Application of normalization parameters and sampling to surface manifolds.
 Second-level (within-subject) fixed-effect analysis.
 
 ``resting_preproc.py`` -- 
-Preprocessing for resting-state scans.
-
-``vbm_preproc.py`` -- 
-Preprocssing for arbitrary VBM style analysis.
+Preprocessing for resting-state scans. 
+Will be deprecated soon when ``preproc.py`` is made more flexible.
 
 ``interfaces.py`` -- 
 A few custom interfaces for scripts that only exist at MIT.
+
+``utility.py`` -- 
+Some utility classes/functions that are useful in workflows.
 
 Experiment
 ----------
@@ -86,7 +87,7 @@ Script to read Psychtoolbox experiment files and create FSL parfiles.
 Siemems/Fluid specific B0 fieldmap preprocessing.
 
 ``fluid_utility.py`` -- 
-Assorted functions used in our NiPype scripts.
+Assorted functions used in our Nipype scripts.    
 
 Note
 ----
