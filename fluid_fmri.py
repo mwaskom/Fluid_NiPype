@@ -16,7 +16,8 @@ import nipype.interfaces.utility as util
 from workflows.preproc import get_preproc_workflow
 from workflows.fsl_model import get_model_workflow
 from workflows.registration import get_registration_workflow
-from workflows.fixed_fx import get_fixedfx_workflow
+from workflows.fsl_fixed_fx import get_fsl_fixed_fx_workflow
+from workflows.freesurfer_fixed_fx import get_freesurfer_fixed_fx_workflow
 
 import fluid_utility as flutil
 
@@ -434,9 +435,9 @@ flutil.archive_crashdumps(registration)
 
 # Get the workflow and nodes
 if space == "volume":
-    fixed_fx, ffx_input, ffx_output = get_fixedfx_workflow()
+    fixed_fx, ffx_input, ffx_output = get_fsl_fixed_fx_workflow()
 elif space == "surface":
-    fixed_fx, ffx_input, ffx_output = get_fixedfx_workflow(volume_report=False)
+    fixed_fx, ffx_input, ffx_output = get_freesurfer_fixed_fx_workflow()
     
 
 infields = ["subject_id", "contrast", "space"]
@@ -493,17 +494,8 @@ def select_first(files):
 
 if space == "volume":
     ffx_input.inputs.mask = fsl.Info.standard_image("MNI152_T1_2mm_brain_mask.nii.gz")
-elif space == "surface":
-    # Generate a mask by binning the cope
-    # Maybe suboptimal?  Are copes ever <1 and important?
-    getmask = pe.Node(fsl.ImageMaths(op_string="-abs -bin",
-                                     suffix="_mask"),
-                      name="getmask")
-    fixed_fx.connect([
-        (ffxsource, getmask,   [(("cope", select_first), "in_file")]),
-        (getmask,   ffx_input, [("out_file", "mask")]),
-        ])
-
+else:
+    fixed_fx.connect(hemisource, "hemi", ffx_input, "hemi")
 
 # Fixed effects Datasink nodes
 ffxsink = pe.Node(nio.DataSink(base_directory=analysis_dir),
