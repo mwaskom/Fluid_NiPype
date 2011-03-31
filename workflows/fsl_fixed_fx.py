@@ -5,7 +5,7 @@ import nipype.pipeline.engine as pe
 from .utility import OutputConnector
 
 
-def get_fixedfx_workflow(name="fixed_fx", volume_report=True):
+def get_fsl_fixed_fx_workflow(name="fixed_fx", volume_report=True):
 
     # Define the workflow
     fixed_fx = pe.Workflow(name=name)
@@ -94,7 +94,7 @@ def get_fixedfx_workflow(name="fixed_fx", volume_report=True):
         rename = OutputConnector(fixed_fx, outputnode)
         rename.connect(sliceflame, "zstat")
         
-        return fixed_fx, inputnode, outputnode
+    return fixed_fx, inputnode, outputnode
     
 
 def get_dof_opstring(doffiles):
