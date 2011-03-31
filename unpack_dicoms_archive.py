@@ -15,8 +15,6 @@ Steps:
 import os
 import sys
 import time
-import shutil
-from os.path import join as pjoin
 from datetime import datetime
 import subprocess
 import argparse
@@ -27,118 +25,15 @@ import nipype.interfaces.io as nio
 import nipype.interfaces.freesurfer as fs
 import nipype.pipeline.engine as pe
 
-VERBOSE = False
-
-def main(arglist):
-
-    data_dir = "/mindhive/gablab/fluid/Data"
-
-    args = parse_cmdline(arglist)
-
-    all = False
-    if args.procs is None:
-        all = True
-
-    if all or "fetch" in args.procs:
-        types = fetch_dicomes(data_dir, args.subjects, args.type)
-
-def fetch_dicoms(data_dir, subjects, type=None):
-    """Get the source images and determine scan type from number of dicom files."""
-    
-    types = []
-
-    if type is None:
-        syncdir = "sync"
-    else:
-        syncdir = type
-
-    for subj in subjects:
-        verbose("Fetching dicoms for %s"%subject)
-        dicomdir = pjoin(data_dir, subject, "dicom")
-        targdir = pjoin(dicomdir, syncdir)
-
-        # External python script to copy over dicom files from sigma
-        fetch_cmd = "fetch_dicoms -s %s -l -q -d %s"%(subject, targdir)
-        verbose(fetch_cmd)
-        os.system(fetch_cmd)
-
-        # Figure out scan type based on number of dicom files
-        if type is None:
-            nfiles = glob(pjoin(targdir, "*.dcm"))
-            if nfiles < 5000:
-                stype = "func"
-            elif nfiles < 8500:
-                stype = "struct"
-            else:
-                stype = "full"
-            verbose("Found %d DICOM files; determined scan type of %s"%(nfiles, stype))
-            os.rename(targdir, pjoin(dicomdir, stype))
-        else:
-            stype = type
-        types.append(stype)
-
-    # Return a list of scan type for each subject
-    return types
-
-def get_unpack_workflow(type):
-    """Define a nipype workflow to unpack the dicoms."""
-
-    pass
-
-def run_info_func(run_info_file):
-    """Read an mri_parse_scdmdir infofile and determine run types."""
-
-    pass
-
-def make_symlinks(run_info_file):
-    """Create symlinks with heurtistic names to unpacked files."""
-
-    pass
-
-def preprocess_anatomicals(stages):
-    """Write and submit a Sun Grid Engine script to preprocess anatomical images."""
-
-    pass
-
-def compress_dicoms(subject, type):
-    """Tar and gzip the dicom directory."""
-
-    pass
-
-def verbose(msg):
-    if VERBOSE:
-        print msg
-
-def parse_cmdline(arglist):
-    """Parse a list of arguments."""
-    parser = argparse.ArgumentParser(usage="unpack_dicoms.py [options]")
-    parser.add_argument("-subjects", nargs="*", metavar="subjid",
-                        help="list of subject ids to unpack")
-    parser.add_argument("-procs", nargs="*", metavar="stages",
-                        help="processing stages to run")
-    parser.add_argument("-type", metavar="scantype", 
-                        help="func, struct, or full -- gets from # of dicoms if not specified")
-    parser.add_argument("-dontunpack", nargs="*", metavar="num",
-                        help="sequence number of run(s) to skip")
-    parser.add_argument("-relink", action="store_true",
-                        help="overwrite any old heuristic links")
-    parser.add_argument("-ipython", action="store_true",
-                        help="run in parallel using IPython")
-    parser.add_argument("-debug", action="store_true", 
-                        help="turn on debugging/verbose output")
-    
-    if len(arglist) < 1:
-        sys.argv.insert(0,"-h")
-    args = parser.parse_args()
-
-    if args.debug:
-        VERBOSE = True
-
-    return args
-
 # Command line arguments
+parser = argparse.ArgumentParser(usage="unpack_dicoms.py [options]")
+parser.add_argument("-subjects", nargs="*", metavar="subjid",
+                    help="list of subject ids to unpack")
+parser.add_argument("-type", metavar="scantype", help="func, struct, or full")
 parser.add_argument("-all", action="store_true", 
                     help="run all subjects with dicom dir")
+parser.add_argument("-dontunpack", nargs="*", metavar="num",
+                    help="sequence number of run(s) to skip")
 parser.add_argument("-moco", action="store_true",
                     help="unpack the MoCo BOLD runs")
 parser.add_argument("-nofetch", dest="fetch",  action="store_false",
@@ -161,10 +56,16 @@ parser.add_argument("-reparse", action="store_true",
                     help="force rerunning of the dicom directory parsing")
 parser.add_argument("-reconvert", action="store_true",
                     help="force rerunning of the dicom conversion")
+parser.add_argument("-relink", action="store_true",
+                    help="overwrite any old heuristic links")
 parser.add_argument("-inseries", action="store_true", 
                     help="force running nipype in series")
+parser.add_argument("-debug", action="store_true", help="turn on debugging/verbose output")
 
 # Display help if we got less than one argument
+if len(sys.argv) < 2:
+    sys.argv.insert(0,"-h")
+args = parser.parse_args()
 
 # Hardcoded data directory and template
 datadir = "/mindhive/gablab/fluid/Data/"
