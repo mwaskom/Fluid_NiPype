@@ -355,7 +355,7 @@ def run_info(info_file, dicom_dir, dont_unpack=[]):
                 # Possibly exception worthy?
                 continue
 
-        elif (name=="ge_func_2x2x2_Resting") and (tps==62):
+        elif (name=="ge_func_2x2x2_Resting") and (tps==62) and not is_moco(pjoin(dicom_dir, dcmfile)):
             group = "bold"
             name = "Resting"
             ftype = "niigz"
@@ -543,9 +543,9 @@ def make_symlinks(data_dir, subject_list, scan_types, dont_unpack=[]):
                     dst = "Resting.nii.gz"
                 else:
                     if name.startswith("MOT"):
-                        par = "_".join(name.split("_")[:3])
-                    else:
                         par = "_".join(name.split("_")[:2])
+                    else:
+                        par = "_".join(name.split("_")[:1])
 
                     dst = "%s_run%d.nii.gz"%(par, bold_hash[par])
 
@@ -659,8 +659,11 @@ def submit_to_sge(subject_id, proc_list):
     qsub_cmd = " ".join(["cd", sge_dir, ";", "qsub", "-q", "long.q", qsub_script])
 
     # And actually submit the job
-    subprocess.Popen(qsub_cmd, stderr=sys.stderr, env=os.environ, shell=True, cwd=sge_dir)
+    proc = subprocess.Popen(qsub_cmd, stdout=subprocess.PIPE, stderr=sys.stderr, 
+                            env=os.environ, shell=True, cwd=sge_dir)
     
+    proc.communicate()
+
 def compress_dicoms(data_dir, subject_list, types):
     """Tar and gzip DICOM directories for a list of subjects."""
 
