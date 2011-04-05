@@ -28,8 +28,7 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
     algorithm will run with four stages of searching, the final stage using sinc interpolation.
     Although this will lead to more accurate motion-correction, it will take considerably
     more time and computational resources. Set as false to use MCFLIRT with the default search
-    schedule. Regardless of search mode, the final reslicing will be performed with sinc
-    interpolation.
+    schedule. 
 
     Input spec node always takes these three inputs:
         - Timeseries (image files)
@@ -101,8 +100,7 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
     exampleslice.inputs.sample_axial=2
 
     # Motion correct to middle volume of each run
-    realign =  pe.MapNode(fsl.MCFLIRT(interpolation="sinc",
-                                      save_mats = True,
+    realign =  pe.MapNode(fsl.MCFLIRT(save_mats = True,
                                       save_plots = True,
                                       save_rms = True),
                           name="realign",
