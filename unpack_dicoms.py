@@ -10,68 +10,127 @@ Steps:
  - Run the Freesurfer reconstruction pipeline
  - Preprocesses DWI images
  - Perform spatial normalization to FSL's template with FLIRT and FNIRT
- - Preprocess fieldmaps
 """
 import os
 import sys
 import time
 import shutil
 from os.path import join as pjoin
-from datetime import datetime
 import subprocess
 import argparse
 from glob import glob
 
 import nipype.interfaces.utility as util
-import nipype.interfaces.io as nio
+import nipype.interfaces.io as io
 import nipype.interfaces.freesurfer as fs
 import nipype.pipeline.engine as pe
 
-VERBOSE = False
-
 def main(arglist):
 
-    data_dir = "/mindhive/gablab/fluid/Data"
+    data_dir = os.environ["DATA"]
 
+    # Parse the commandline
     args = parse_cmdline(arglist)
 
-    all = False
+    # Set all if no processing stages were specified
+    doall = False
     if args.procs is None:
-        all = True
+        doall = True
 
-    if all or "fetch" in args.procs:
-        types = fetch_dicomes(data_dir, args.subjects, args.type)
+    # We'll refer to subject list a lot, so get a direct ref
+    s_list = args.subjects
+
+    # Fetch the dicoms from the sigma server
+    if doall or "fetch" in args.procs:
+        types = fetch_dicoms(data_dir, s_list, args.type)
+    elif args.type is None:
+        sys.exit("Scan type must be specified if skipping dicom fetch")
+    else:
+        types = [args.type for s in s_list]
+
+    # Use Nipype to unpack the DICOMS
+    if doall or "unpack" in args.procs:
+        # Get the unpacking workflow
+        unpacker = get_unpack_workflow(s_list)
+
+        # Feed some information into the workflow
+        unpacker.inputs.flowinfo.data_dir = data_dir
+        unpacker.inputs.flowinfo.dont_unpack = args.dontunpack
+        unpacker.inputs.flowinfo.subj_dict = dict(zip(s_list, types))
+
+        # Set the datasink output directory
+        unpacker.inputs.datasink.base_directory = data_dir
+        
+        # Possibly set the working directory
+        if args.workingdir is not None:
+            unpacker.base_dir = args.workingdir
+        
+        # Run the workflow
+        if args.ipython:
+            plugin = "IPython"
+        else:
+            plugin = "Linear"
+        unpacker.run(plugin=plugin)
+
+    if doall or "link" in args.procs:
+        # Create heuristic symlinks to the converted files
+        make_symlinks(data_dir, s_list, types, args.dontunpack)
+
+    # Figure out that anatomical preprocessing that needs to be done
+    anat_stages = ["recon", "dwi", "norm"]
+
+    if doall or "anat" in args.procs:
+        anat_proc = anat_stages
+    else:
+        anat_proc = []
+        for proc in args.procs:
+            if proc in anat_stages:
+                anat_proc.append(proc)
+   
+    # And do it
+    # (This ends up writing a script and submitting it to the
+    # Sun Grid Engine via qsub, but that all happens below)
+    if anat_proc:
+        preprocess_anatomicals(data_dir, s_list, types, anat_proc)
+
+    # Tar and Gzip the DICOMS
+    if doall or "zip" in args.procs:
+        compress_dicoms(data_dir, s_list, types)
+
 
 def fetch_dicoms(data_dir, subjects, type=None):
     """Get the source images and determine scan type from number of dicom files."""
     
     types = []
-
+    
+    # Without a given type, sync to temporary directory 
     if type is None:
         syncdir = "sync"
     else:
         syncdir = type
 
+    # Make sure subjects is a list to avoid bad things
+    if not isinstance(subjects, list):
+        subjects = [subjects]
+
+    # Iterate through the list of subjects, grabbing their dicoms
     for subj in subjects:
-        verbose("Fetching dicoms for %s"%subject)
-        dicomdir = pjoin(data_dir, subject, "dicom")
+        dicomdir = pjoin(data_dir, subj, "dicom")
         targdir = pjoin(dicomdir, syncdir)
 
-        # External python script to copy over dicom files from sigma
-        fetch_cmd = "fetch_dicoms -s %s -l -q -d %s"%(subject, targdir)
-        verbose(fetch_cmd)
+        # Call external python script to copy over dicom files from sigma
+        fetch_cmd = "fetch_dicoms -s %s -l -q -d %s"%(subj, targdir)
         os.system(fetch_cmd)
 
         # Figure out scan type based on number of dicom files
         if type is None:
-            nfiles = glob(pjoin(targdir, "*.dcm"))
+            nfiles = len(glob(pjoin(targdir, "*.dcm")))
             if nfiles < 5000:
                 stype = "func"
             elif nfiles < 8500:
                 stype = "struct"
             else:
                 stype = "full"
-            verbose("Found %d DICOM files; determined scan type of %s"%(nfiles, stype))
             os.rename(targdir, pjoin(dicomdir, stype))
         else:
             stype = type
@@ -80,160 +139,279 @@ def fetch_dicoms(data_dir, subjects, type=None):
     # Return a list of scan type for each subject
     return types
 
-def get_unpack_workflow(type):
+def get_unpack_workflow(subject_list=[]):
     """Define a nipype workflow to unpack the dicoms."""
 
-    pass
+    # Create the workflow
+    unpacker = pe.Workflow(name="unpack")
 
-def run_info_func(run_info_file):
-    """Read an mri_parse_scdmdir infofile and determine run types."""
-
-    pass
-
-def make_symlinks(run_info_file):
-    """Create symlinks with heurtistic names to unpacked files."""
-
-    pass
-
-def preprocess_anatomicals(stages):
-    """Write and submit a Sun Grid Engine script to preprocess anatomical images."""
-
-    pass
-
-def compress_dicoms(subject, type):
-    """Tar and gzip the dicom directory."""
-
-    pass
-
-def verbose(msg):
-    if VERBOSE:
-        print msg
-
-def parse_cmdline(arglist):
-    """Parse a list of arguments."""
-    parser = argparse.ArgumentParser(usage="unpack_dicoms.py [options]")
-    parser.add_argument("-subjects", nargs="*", metavar="subjid",
-                        help="list of subject ids to unpack")
-    parser.add_argument("-procs", nargs="*", metavar="stages",
-                        help="processing stages to run")
-    parser.add_argument("-type", metavar="scantype", 
-                        help="func, struct, or full -- gets from # of dicoms if not specified")
-    parser.add_argument("-dontunpack", nargs="*", metavar="num",
-                        help="sequence number of run(s) to skip")
-    parser.add_argument("-relink", action="store_true",
-                        help="overwrite any old heuristic links")
-    parser.add_argument("-ipython", action="store_true",
-                        help="run in parallel using IPython")
-    parser.add_argument("-debug", action="store_true", 
-                        help="turn on debugging/verbose output")
+    # Set up some informational nodes
+    subjsource = pe.Node(util.IdentityInterface(fields=["subject_id"]),
+                         iterables=("subject_id", subject_list),
+                         name="subjsource")
     
-    if len(arglist) < 1:
-        sys.argv.insert(0,"-h")
-    args = parser.parse_args()
 
-    if args.debug:
-        VERBOSE = True
+    flowinfo = pe.Node(util.Function(input_names=["data_dir",
+                                                  "dont_unpack",
+                                                  "subj_dict",
+                                                  "subject_id"],
+                                     output_names=["dicom_dir",
+                                                   "dont_unpack",
+                                                   "scan_type"],
+                                     function=flow_info),
+                         name="flowinfo")
+    
+    # Parse the dicom directory to get sequence information
+    parsedcms = pe.Node(interface=fs.ParseDICOMDir(sortbyrun=True,
+                                                   summarize=True),
+                        name="parsedcms")
 
-    return args
+    # Mine the dicom directory summary file for information about runs
+    runinfo = pe.Node(interface=util.Function(input_names=["info_file",
+                                                           "dicom_dir",
+                                                           "dont_unpack"],
+                                              output_names=["files",
+                                                            "groups",
+                                                            "seqs",
+                                                            "names",
+                                                            "ftypes",
+                                                            "args"],
+                                              function=run_info),
+                      name="runinfo")
 
-# Command line arguments
-parser.add_argument("-all", action="store_true", 
-                    help="run all subjects with dicom dir")
-parser.add_argument("-moco", action="store_true",
-                    help="unpack the MoCo BOLD runs")
-parser.add_argument("-nofetch", dest="fetch",  action="store_false",
-                    help="run fetch_dicoms to copy from sigma before unpacking")
-parser.add_argument("-nopype", dest="pype", action="store_false",
-                    help="don't run the unpacking pipeline")
-parser.add_argument("-nolink", dest="link", action="store_false",
-                    help="don't create the heuristic links")
-parser.add_argument("-norecon", dest="recon", action="store_false",
-                    help="don't run recon-all after unpacking")
-parser.add_argument("-forcerecon", action="store_true",
-                    help="force recon-all submission even if recon-all.log exsists")
-parser.add_argument("-nodwi", dest="dwi", action="store_false",
-                    help="don't run dt_recon to unpack the DWI image")
-parser.add_argument("-nonorm", dest="norm", action="store_false",
-                    help="don't perform FSL normalization")
-parser.add_argument("-nofieldmaps", dest="fieldmaps", action="store_false",
-                    help="don't preprocess the fieldmaps")
-parser.add_argument("-reparse", action="store_true",
-                    help="force rerunning of the dicom directory parsing")
-parser.add_argument("-reconvert", action="store_true",
-                    help="force rerunning of the dicom conversion")
-parser.add_argument("-inseries", action="store_true", 
-                    help="force running nipype in series")
+    # Get a list of dicom files we want to convert
+    dcmpath = pe.Node(util.Function(input_names=["dicom_dir",
+                                                 "dicom_files",
+                                                 "args"],
+                                    output_names=["out_files"],
+                                    function=get_dicom_path),
+                       name="dcmpath")
 
-# Display help if we got less than one argument
+    # Write text files identifying the dicoms in a series for faster processing
+    writeflfs = pe.Node(util.Function(input_names=["dicom_dir",
+                                                   "dicom_files",
+                                                   "seq_numbers",
+                                                   "groups",
+                                                   "args"],
+                                     output_names=["fl_files"],
+                                     function=write_file_lists),
+                        name="writeflfs")
 
-# Hardcoded data directory and template
-datadir = "/mindhive/gablab/fluid/Data/"
-subject_template = "gf*"
+    # Convert the files from DCM
+    convert = pe.MapNode(fs.MRIConvert(in_type="siemens_dicom"),
+                         iterfield=["in_file", "sdcm_list", "out_type", "args"],
+                         name="convert")
+                                       
+    # Rename the image files according to sequence
+    rename = pe.Node(util.Function(input_names=["scan_type",
+                                                "converted_images",
+                                                "seq_numbers",
+                                                "ftypes",
+                                                "args"],
+                                   output_names=["out_files"],
+                                   function=rename_images),
+                     name="rename")
 
-# If type not specified, set to a null string
-# Dicom files will be expected to be in $subject/dicom
-# This should work, but I haven't actually tested it.
-if not args.type:
-    args.type = ""
+    # Rename the info file according to scan type
+    renameinfo = pe.Node(util.Function(input_names=["scan_type",
+                                                    "info_file"],
+                                       output_names=["info_file"],
+                                       function=rename_info_file),
+                         name="renameinfo") 
 
-# Don't do any structural processing if we're just 
-# unpacking a functional session
-if args.type == "func":
-    args.recon = False
-    args.dwi = False
-    args.norm = False
+    # Sink the files in the data directory
+    datasink = pe.Node(io.DataSink(parameterization=False),
+                       name="datasink")
 
-# Initialize the subjectinfo dict
-subjectinfo = {}
+    unpacker.connect([
+        (subjsource,  flowinfo,     [("subject_id", "subject_id")]),
+        (flowinfo,    parsedcms,    [("dicom_dir", "dicom_dir")]),
+        (flowinfo,    runinfo,      [("dont_unpack", "dont_unpack"),
+                                     ("dicom_dir", "dicom_dir")]),
+        (parsedcms,   runinfo,      [("dicom_info_file", "info_file")]),
+        (flowinfo,    dcmpath,      [("dicom_dir", "dicom_dir")]),
+        (runinfo,     dcmpath,      [("files", "dicom_files"),
+                                     ("args","args")]),
+        (flowinfo,    writeflfs,    [("dicom_dir", "dicom_dir")]),
+        (runinfo,     writeflfs,    [("files", "dicom_files"),
+                                     ("seqs", "seq_numbers"),
+                                     ("groups", "groups"),
+                                     ("args", "args")]),
+        (dcmpath,     convert,      [("out_files", "in_file")]),
+        (writeflfs,   convert,      [("fl_files", "sdcm_list")]),
+        (runinfo,     convert,      [("ftypes", "out_type"),
+                                     ("args","args")]),
+        (flowinfo,    rename,       [("scan_type", "scan_type")]),
+        (convert,     rename,       [("out_file", "converted_images")]),
+        (runinfo,     rename,       [("seqs", "seq_numbers"),
+                                     ("ftypes", "ftypes"),
+                                     ("args", "args")]),
+        (parsedcms,   renameinfo,   [("dicom_info_file", "info_file")]),
+        (flowinfo,    renameinfo,   [("scan_type", "scan_type")]),
+        (rename,      datasink,     [("out_files", "nifti.@images")]),
+        (renameinfo,  datasink,     [("info_file", "unpack.@info")]),
+        (subjsource,  datasink,     [("subject_id", "container")]),
+    ])
 
-# Get subjects from command line, or glob based on template
-if args.fetch and args.all:
-    sys.exit("Cannot use -all when requesting DICOM fetch")
-if args.subjects:
-    subjects = args.subjects
-elif args.all:
-    subject_dirs = glob(os.path.join(datadir,subject_template,"dicom",args.type))
-    subjects = [d.split("/")[-3] for d in subject_dirs]
-else:
-    sys.exit("\nMust use either -subjects or -all")
-if args.debug:
-    print "Subjects: " + " ".join(subjects)
+    return unpacker
 
-# Fetch the DICOMS
-# ----------------
-for subject in subjects:
-    targdir = os.path.join(datadir, subject, "dicom", args.type)
-    if not os.path.exists(targdir) and args.fetch:
-        os.system("fetch_dicoms -s %s -l -q -d %s"%(subject, targdir))
-
-
-# Pipeline functions
-# ------------------
-
-def get_dicom_dir(subject):
-    """Return the path to a dicom directory"""
+def flow_info(data_dir, dont_unpack, subj_dict, subject_id):
+    """Little function to provide some basic info to the workflow.""" 
     from os.path import join as pjoin
-    from glob import glob
-    return glob(pjoin(datadir,subject,"dicom",args.type))[0]
 
+    scan_type = subj_dict[subject_id]
+    dicom_dir = pjoin(data_dir, subject_id, "dicom", scan_type)
+    return dicom_dir, dont_unpack, scan_type
+
+def run_info(info_file, dicom_dir, dont_unpack=[]):
+    """Read an mri_parse_scdmdir infofile and determine run types."""
+    from os.path import join as pjoin
+    import numpy as np
+    from unpack_dicoms import is_moco, get_fmap_type
+
+
+    # Initialize the output lists
+    files = []
+    groups =[]
+    seqs = []
+    names = []
+    ftypes = []
+    args = []
+
+    # Read the file into a numpy array
+    seqfile = np.genfromtxt(info_file, dtype=object)
+
+    # Go through the file and build the output lists
+    for line in seqfile:
+        seqn = int(line[2])
+
+        # dont_unpack should be list of ints
+        if seqn in dont_unpack:
+            continue
+
+        # Basic info
+        dcmfile = line[1]
+        name = line[12]
+        slices, tps = tuple([int(dim) for dim in line[8:10]])
+        
+        # Set the extra arg to a null string
+        # As of now it only gets used for FLASH
+        arg = ""
+        
+        # Fill in output lists based on the acquisition
+        if (slices==176) and (tps==1) and name.startswith("T1_MPRAGE"):
+            # We want to convert the mprage twice (once to nii, once to mgh)
+            # This is hacky, but let's update the output lists directly here
+            # once, and then also set the variables get updated at the end of
+            # this big if elif block
+            files.append(dcmfile)
+            groups.append("mri")
+            seqs.append(seqn)
+            names.append("001")
+            ftypes.append("mgz")
+            args.append("")
+            
+            # And this stuff gets added later 
+            group = "structural"
+            ftype = "niigz"
+            name = "mprage"
+
+        elif name.startswith("field_mapping"): 
+            fmaptype = get_fmap_type(pjoin(dicom_dir, dcmfile))
+            if name == "field_mapping":
+                name = "func_%s_fm"%fmaptype
+            else:
+                name = "".join([name.replace("field_mapping_","").lower(), "_%s_fm"%fmaptype])
+            group = "fieldmaps"
+            ftype = "niigz"
+
+        elif (tps==70) and name.startswith("DIFFUSION"):
+            group = "dwi"
+            name = "diffusion"
+            ftype = "niigz"
+
+        elif (slices==176) and name.startswith("gre_mgh_multiecho"):
+            # Get the flip angle from the acquisition name
+            alpha = int(name[18:-12])
+
+            if tps == 1:
+                # RMS image gets handled normally
+                name = "flash_%02d-rms"%alpha
+                group = "flash"
+                ftype = "mgz"
+
+            elif tps == 8:
+                # For the echos, modify the output lists directly and then bail out
+                for echo in range(8):
+                    files.append(dcmfile)
+                    seqs.append(seqn)
+                    names.append("flash_%02d-%d"%(alpha, echo))
+                    groups.append("flash")
+                    ftypes.append("mgz")
+                    args.append("-nth %d"%echo)
+                continue 
+            else:
+                # Getting here would be really weird
+                # Possibly exception worthy?
+                continue
+
+        elif (name=="ge_func_2x2x2_Resting") and (tps==62):
+            group = "bold"
+            name = "Resting"
+            ftype = "niigz"
+
+        elif ("ge_func" in name) and not is_moco(pjoin(dicom_dir, dcmfile)):
+            # This seems like a hack?
+            fullacqs = dict(NBack=198, IQ=244, MOT_Block=248, MOT_Jitter=302)
+            full = False
+            for acqname, trs in fullacqs.items():
+                if name.startswith(acqname) and tps==trs:
+                    full = True
+            if not full:
+                continue
+
+            group = "bold"
+            name = name
+            ftype = "niigz"
+            
+        else:
+            continue
+
+        # If we make it here, we want this sequence
+        # So update the output lists
+        files.append(dcmfile)
+        groups.append(group)
+        seqs.append(seqn)
+        names.append(name)
+        ftypes.append(ftype)
+        args.append(arg)
+
+        # Now get rid of the sequence variables
+        # I think this should help prevent silly bugs
+        del dcmfile, group, seqn, name, ftype, arg
+        
+    return files, groups, seqs, names, ftypes, args
+    
 def is_moco(dcmfile):
-    """Determine if a run has on-line motion correction"""
+    """Determine if a run has on-line motion correction."""
+    import sys
     import subprocess
     cmd = ['mri_probedicom', '--i', dcmfile, '--t', '8', '103e']
     proc  = subprocess.Popen(cmd,
                              stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE)
-    stdout, stderr = proc.communicate()
+                             stderr=sys.stderr)
+    stdout = proc.communicate()[0]
     return stdout.strip().startswith('MoCoSeries')
 
-def fieldmap_type(dcmfile):
-    """Determine the type of a fieldmapping dicom"""
+def get_fmap_type(dcmfile):
+    """Determine the type of a fieldmapping dicom."""
+    import sys
     import subprocess
     cmd = ["mri_probedicom", "--i", dcmfile, "--t", "8", "8"]
     proc = subprocess.Popen(cmd,
                             stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE)
-    stdout, stderr = proc.communicate()
+                            stderr=sys.stderr)
+    stdout = proc.communicate()[0]
     if stdout.strip()[-4] == "M":
         return "mag"
     elif stdout.strip()[-4] == "P":
@@ -241,422 +419,304 @@ def fieldmap_type(dcmfile):
     else:
         raise TypeError("Could not determine fieldmap type of %s"%dcmfile)
 
-def parse_info_file(dcminfofile, writeflf=True):
-    """Get information from the dicom info file about the runs"""
-    import os
+def get_dicom_path(dicom_dir, dicom_files, args):
+    """Given inputs, return a list of paths to dicom files."""
+    from os.path import join
+    out_files = []
+    for i, f in enumerate(dicom_files):
+        if args[i]:
+            echo = int(args[i][-1])
+            f = f.replace("-1.dcm","-%d.dcm"%(1+(echo*176)))
+        out_files.append(join(dicom_dir, f))
+    return out_files
+
+def write_file_lists(dicom_dir, dicom_files, seq_numbers, groups, args):
+    """Write text files containing a list of dicom files in each acquistion we want to convert."""
+    from glob import glob
+    from os import getcwd
     from os.path import join as pjoin
-    import numpy as np
-    infopath = dcminfofile.split("/")
-    try:
-        subject = [d.replace("_sid_","") for d in infopath if d.startswith("_sid_")][0]
-    except IndexError:
-        subject = [d for d in infopath if d.startswith(subject_template.replace("*",""))][0]
+
+    fl_files = []
     
-    try:
-        info = subjectinfo[subject]
-        if args.debug:
-            print "Using cached info list"
-    except KeyError:
-        seqfile = np.genfromtxt(dcminfofile, dtype=object)
-        info = []
-        # Parse by line
-        for l in seqfile:
-            seqn = l[2]
-            if args.debug:
-               print "Sequence info:\n\t%s"%(" ".join(l))
-            if not args.dontunpack or not seqn in args.dontunpack:
-                name = l[12]
-                dcmfile = l[1]
-                x,y,s,t = tuple([int(dim) for dim in l[6:10]])
-                
-                if (s==176) and (t==1) and name.startswith("T1_MPRAGE"):
-                    info.append(("structural",dcmfile,seqn, name))
-                    info.append(("mprage",dcmfile,seqn, name))
-                elif name == "ep2d_t1w":
-                    if args.type == "full":
-                        pfix = "func"
-                    else:
-                        pfix = args.type
-                    info.append(("structural",dcmfile,seqn, "%s-%s"%(pfix,name)))
-                elif name.startswith("field_mapping"):
-                    fmaptype = fieldmap_type(
-                        pjoin(datadir,subject,"dicom",args.type,dcmfile))
-                    if name == "field_mapping":
-                        seqname = "func_%s_fm"%fmaptype
-                    else:
-                        seqname = name.replace("field_mapping_","").lower() + "_%s_fm"%fmaptype
-                    info.append(("fieldmaps",dcmfile,seqn,seqname))
-                elif (t==70) and name.startswith("DIFFUSION"):
-                    info.append(("dwi",dcmfile,seqn,"diffusion"))
-                elif (s==176) and (t==1) and name.startswith("gre_mgh_multiecho"):
-                    angle = int(name[18:-12])
-                    info.append(("flash",dcmfile,seqn,"flash_%02d-rms"%angle))
-                elif ("ge_func" in name
-                      and not is_moco(pjoin(datadir,subject,"dicom",args.type,dcmfile))):
-                    if (t==198) and name.startswith("NBack"):
-                        info.append(("bold",dcmfile,seqn,name))
-                    elif (t==248) and name.startswith("MOT_Block"):
-                        info.append(("bold",dcmfile,seqn,name))
-                    elif (t==302) and name.startswith("MOT_Jitter"):
-                        info.append(("bold",dcmfile,seqn,name))
-                    elif (t==208) and name.startswith("RT_ge_func"):
-                        info.append(("bold",dcmfile,seqn,name))
-                    elif (t==244) and name.startswith("IQ_ge_func"):
-                        info.append(("bold",dcmfile,seqn,name))
-                    elif (t==62) and name.endswith("Resting"):
-                        info.append(("bold",dcmfile,seqn,"Resting"))
-                elif (args.moco
-                      and "ge_func" in name
-                      and is_moco(pjoin(datadir,subject,"dicom",args.type,dcmfile))):
-                    name = name.split("_")[0] + "-moco"
-                    if (t==198) and name.startswith("NBack"):
-                        info.append(("bold",dcmfile,seqn,name))
-                    elif (t==248) and name.startswith("MOT_Block"):
-                        info.append(("bold",dcmfile,seqn,name))
-                    elif (t==302) and name.startswith("MOT_Jitter"):
-                        info.append(("bold",dcmfile,seqn,name))
-                    elif (t==244) and name.startswith("IQ_ge_func"):
-                        info.append(("bold",dcmfile,seqn,name))
-                    elif (t==62) and name.endswith("Resting"):
-                        info.append(("bold",dcmfile,seqn,"Resting"))
-                else:
-                    if args.debug:
-                        print "***Skipping sequence***"
-        subjectinfo[subject] = info
-
-    # Write files containing lists of the dicoms in each series to speed up mri_convert
-    if writeflf:
-        for seqinfo in info:
-            flfdir = pjoin(datadir, subject, "unpack", "flf")
-            if not os.path.isdir(flfdir):
-                os.makedirs(flfdir)
-            alldcms = glob(os.path.join(
-                datadir,subject,"dicom",args.type,seqinfo[1][:-5]+"*"))
-            flffile = open(os.path.join(
-                flfdir, subject + "_%s"%args.type + "_seq" + seqinfo[2]),"w")
-            flffile.write(" ".join(alldcms))
-            flffile.close()
-
-    return info
-
-def get_out_filename(dcminfofile):
-    """Name the raw nifti files based on the seqence number"""
-    infolist = parse_info_file(dcminfofile)
-    return ["%s_seq_%02d"%(args.type,int(t[2])) for t in infolist]
-
-def get_out_ftype(dcminfofile):
-    """Write files to nii.gz unless it's the mprage or flash"""
-    infolist = parse_info_file(dcminfofile)
-    typelist = []
-    if args.debug:
-        print "Running get_out_ftype function"
-    for info in infolist:
-        if args.debug:
-            print "Sequence info: %s"%str(info)
-        if info[0] == "mprage" or info[3].startswith("flash"):
-            typelist.append(("mgz", ".mgz"))
+    for i, fname in enumerate(dicom_files):
+        fhead = pjoin(dicom_dir, fname[:-5])
+        if groups[i] == "flash" and args[i]:
+            # Do multiecho flash files
+            # This works because args[i] will be null string unless it's a FLASH echo
+            echo = int(args[i][-1])
+            flf = pjoin(getcwd(), "seq_%02d_echo_%d_files.txt"%(seq_numbers[i], echo))
+            with open(flf, "w") as fobj:
+                # Build the list manually
+                start = 1 + (echo * 176)
+                end = start + 176
+                files = ["".join([fhead, str(f), ".dcm"]) for f in xrange(start, end)]
+                fobj.write(" ".join(files))
+            fl_files.append(flf)
         else:
-            typelist.append(("niigz", ".nii.gz"))
-    return typelist
-    
-def get_img_name(subj, seq, ftype):
-    """Get the source file name"""    
+            # Everything else gets written here
+            flf = pjoin(getcwd(), "seq_%02d_files.txt"%seq_numbers[i])
+            with open(flf, "w") as fobj:
+                # Buld the list by a glob (maybe dangerous?)
+                files = glob("".join([fhead, "*.dcm"]))
+                fobj.write(" ".join(files))
+            fl_files.append(flf)
+
+    return fl_files
+
+def rename_images(scan_type, converted_images, seq_numbers, ftypes, args):
+    """Rename the list of images to reflect provenance info before datasinking."""
+    from os import symlink, getcwd
     from os.path import join as pjoin
-    return pjoin(datadir, subj, "nifti/%s_seq_%02d.%s"%(args.type,int(seq),ftype))
 
+    extdict = dict(niigz="nii.gz", mgz="mgz")
+    out_files = []
+    for i, img in enumerate(converted_images):
+        imgstring = "%s_seq_%02d"%(scan_type, seq_numbers[i])
+        if args[i]:
+            imgstring += "_echo_%d"%int(args[i][-1])
+        dst = pjoin(getcwd(), ".".join([imgstring, extdict[ftypes[i]]]))
+        symlink(img, dst)
+        out_files.append(dst)
+    return out_files
 
-# Unpacking pipeline 
-# ------------------
+def rename_info_file(scan_type, info_file):
+    from os import symlink, getcwd
+    from os.path import join as pjoin
 
-# Subject id iterable
-subjsource = pe.Node(interface=util.IdentityInterface(fields=["sid"]),
-                     name='subjinfo',
-                     iterables = ("sid", subjects))
+    dst = pjoin(getcwd(), "%s-dicominfo.txt"%scan_type)
+    symlink(info_file, dst)
+    return dst
 
-# Parse a dicom directory to get sequence information
-dcminfo = pe.Node(interface=fs.ParseDICOMDir(sortbyrun=True,
-                                             summarize=True),
-                  name="dicominfo")
-dcminfo.overwrite = args.reparse
+def make_symlinks(data_dir, subject_list, scan_types, dont_unpack=[]):
+    """Create symlinks with heurtistic names to unpacked files."""
 
-# DataGrabber for dicom images
-dcmsource = pe.MapNode(interface=nio.DataGrabber(infields=["sid","dcmfile"],
-                                                 outfields=["dicompath"]),
-                       name="dicomsource",
-                       iterfield=["dcmfile"])
+    for i, subj in enumerate(subject_list):
+        scan_type = scan_types[i]
+        subj_dir = pjoin(data_dir, subj)
+        dicom_dir = pjoin(subj_dir, "dicom", scan_type)
+        info_file = pjoin(subj_dir, "unpack", "%s-dicominfo.txt"%scan_type)
+        
+        # Call the run_info function to get lists of information
+        files, groups, seqs, names, ftypes, args = run_info(info_file, dicom_dir, dont_unpack)
 
-dcmsource.inputs.base_directory = datadir
-dcmsource.inputs.template = "%s/%s/"+args.type+"/%s"
-dcmsource.inputs.template_args = dict(dicompath=[["sid","dicom","dcmfile"]])
+        # Make a functional hash to deal with multiple runs
+        bold_hash = dict(IQ=1,NBack=1,MOT_Block=1,MOT_Jitter=1)
 
-# DataGrabber for filelist files
-flfsource = pe.MapNode(interface=nio.DataGrabber(infields=["sid","seqn"],
-                                                 outfields=["flfpath"]),
-                       name="flfsource",
-                       iterfield=["seqn"])
+        # Dict for extensions
+        type_dict = dict(niigz="nii.gz", mgz="mgz")
 
-flfsource.inputs.base_directory = datadir
-flfsource.inputs.template = "%s/unpack/flf/%s_"+args.type+"_seq%s"
-flfsource.inputs.template_args = dict(flfpath=[["sid","sid","seqn"]])
+        # Iterate through the acquistions that got converted
+        for j, seq in enumerate(seqs):
+            group = groups[j]
+            name = names[j]
+            extra_arg = args[j]
 
-# Dummy node to facilitate sensible naming
-nameimg = pe.MapNode(interface=util.IdentityInterface(fields=["outfile"]),
-                     name="nameimage",
-                     iterfield=["outfile"])
-
-# Use mri_convert to unpack the dicoms
-convert = pe.MapNode(interface=fs.MRIConvert(in_type="siemens_dicom"),
-                     name="convertdicoms",
-                     iterfield=["in_file", "sdcm_list", "out_type"])
-convert.overwrite = args.reconvert
-
-# Node to create a substitutions list
-rename = pe.Node(interface=util.Merge(3, axis="hstack"), name="renameniftis")
-
-# DataSink for the nifti/mgz files
-datasink = pe.Node(interface=nio.DataSink(),name="datasink")
-datasink.inputs.base_directory = datadir
-datasink.inputs.parameterization = False
-
-# Workflow definition
-unpack = pe.Workflow(name="unpack_%s"%args.type)
-unpack.base_dir = "/mindhive/gablab/fluid/Analysis/Nipype/workingdir/unpack"
-
-# Workflow connection
-unpack.connect(
-    [(subjsource, dcminfo,
-        [(("sid", get_dicom_dir), "dicom_dir")]),
-     (subjsource, dcmsource,
-        [("sid", "sid")]),
-     (dcminfo, dcmsource,
-        [(("dicom_info_file", lambda x: [t[1] for t in parse_info_file(x)]),"dcmfile")]),
-     (subjsource, flfsource,
-        [("sid", "sid")]),
-     (dcminfo, flfsource,
-        [(("dicom_info_file", lambda x: [t[2] for t in parse_info_file(x)]),"seqn")]),
-     (dcminfo, nameimg,
-        [(("dicom_info_file", get_out_filename), "outfile")]),
-     (dcminfo, convert,
-        [(("dicom_info_file", lambda x: [t[0] for t in get_out_ftype(x)]), "out_type")]),
-     (dcmsource, convert,
-        [("dicompath", "in_file")]),
-     (flfsource, convert,
-        [("flfpath", "sdcm_list")]),
-     (convert, rename,
-        [(("out_file", lambda x: [os.path.split(f)[1] for f in x]), "in1")]),
-     (nameimg, rename,
-        [("outfile", "in2")]),
-     (dcminfo, rename,
-        [(("dicom_info_file", get_out_ftype), "in3")]),
-     (subjsource, datasink,
-        [("sid", "container")]),
-     (rename, datasink,
-        [(("out", lambda x: 
-            [("dicominfo.txt","%s-dicominfo.txt"%args.type)] + 
-                [(l[0],l[1]+l[2][1]) for l in x]), "substitutions")]),
-     (convert, datasink,
-        [("out_file", "nifti.@niifiles")]),
-     (dcminfo, datasink,
-        [("dicom_info_file", "unpack.@info")]),
-    ])
-
-# File crashdumps by date
-datestamp = str(datetime.now())[:10]
-codepath = os.path.split(os.path.abspath(__file__))[0]
-crashdir = os.path.abspath("%s/crashdumps/%s" % (codepath, datestamp))
-if not os.path.isdir(crashdir):    
-    os.makedirs(crashdir)
-unpack.config = dict(crashdump_dir=crashdir) 
-
-# Run the pipeline
-if args.pype:
-    unpack.run(inseries=args.inseries)
-    #unpack.run(plugin="linear")
-
-# Softlink heuristically 
-# ----------------------
-
-for subj in subjects:
-    # This file should be created by the pipeline above
-    infofile = os.path.join(datadir, subj, "unpack/%s-dicominfo.txt"%args.type)
-    if args.debug:
-        print "Parsing %s for linking"%infofile
-    if os.path.exists(infofile) and args.link:
-        # Get information about the sequences
-        info = parse_info_file(infofile, writeflf=False)
-        # Hash dict to control names for multiple runs
-        boldhash = dict(IQ=1,NBack=1,RT=1,MOT_Jitter=1,MOT_Block=1)
-        for seq in info:
-            if args.debug:
-                print "Sequence info: %s"%str(seq)
-            # This is the recon-all mprage souce
-            if seq[0]=="mprage":
-                src = get_img_name(subj, seq[2], "mgz")
-                trg = os.path.join(datadir, subj, "mri/orig/001.mgz")
-            # Other images get linked here
+            # Define the source image
+            if group == "flash" and extra_arg:
+                echo = int(extra_arg[-1])
+                src = pjoin(subj_dir, "nifti", "%s_seq_%02d_echo_%d.mgz"%(scan_type, seq, echo))
             else:
-                type = seq[0]
-                dcmfile = seq[1]
-                seqn = seq[2]
-                name = seq[3]
-                trgdir = os.path.join(datadir, subj, type)
-                # Nifti mprage, low-res T1, and FLASH images
-                if type == "structural":
-                    if name.endswith("ep2d_t1w"):
-                        src = get_img_name(subj, seqn, "nii.gz")
-                        trgfile = name + ".nii.gz"
-                    elif name.startswith("T1_MPRAGE"):
-                        src = get_img_name(subj, seqn, "nii.gz")
-                        trgfile = "mprage.nii.gz"
-                # We unpack the FLASH rms image here, and get
-                # the individual echos later
-                elif type == "flash":
-                    src = get_img_name(subj, seqn, "mgz")
-                    trgfile = "%s.mgz"%name
-                # Functional runs
-                elif type == "bold":
-                    src = get_img_name(subj, seqn, "nii.gz")
-                    if is_moco(dcmfile):
-                        moco = "moco"
-                    else:
-                        moco = ""
-                    if name == "Resting":
-                        trgfile = "Resting%s.nii.gz"%moco
-                    else:
-                        if name.startswith("MOT"):
-                            par = "MOT_" + name.split("_")[1]
-                        else:
-                            par = name.split("_")[0]
-                        nrun = boldhash[par]
-                        boldhash[par] += 1
-                        trgfile = "%s_run%d%s.nii.gz"%(par,nrun,moco)
-                # Diffusion.
-                elif type == "dwi":
-                    src = get_img_name(subj, seqn, "nii.gz")
-                    trgfile = "%s.nii.gz"%name
-                # Fieldmaps.  Both magnitude and phase series get unpacked
-                elif type == "fieldmaps":
-                    src = get_img_name(subj, seqn, "nii.gz")
-                    trgfile = "%s.nii.gz"%name
+                src = pjoin(subj_dir, "nifti", "%s_seq_%02d.%s"%(scan_type, seq, type_dict[ftypes[j]]))
+
+            # Build the dst name based on info
+            dst_dir = pjoin(subj_dir, group)
+            if group == "mri":
+                dst_dir = pjoin(dst_dir, "orig")
+                dst =  "001.mgz"
+            
+            elif group == "structural":
+                dst = "mprage.nii.gz"
+
+            elif group == "dwi":
+                dst = "diffusion.nii.gz"
+            
+            elif group == "fieldmaps":
+                dst = ".".join([name, "nii.gz"])
+
+            elif group == "flash":
+                # Echo information is in flash name field
+                dst = ".".join([name, "mgz"])
+
+            elif group == "bold":
+                
+                if name == "Resting":
+                    dst = "Resting.nii.gz"
                 else:
-                    pass
-                trg = os.path.join(trgdir, trgfile)
+                    if name.startswith("MOT"):
+                        par = "_".join(name.split("_")[:3])
+                    else:
+                        par = "_".join(name.split("_")[:2])
+
+                    dst = "%s_run%d.nii.gz"%(par, bold_hash[par])
+
+                    bold_hash[par] += 1
+
             if os.path.exists(src):
-                if os.path.lexists(trg) and args.relink:
-                    os.remove(trg)
-                if not os.path.lexists(trg):
-                    trgdir = os.path.split(trg)[0]
-                    if not os.path.isdir(trgdir):
-                        os.makedirs(trgdir)
-                    if args.debug:
-                        print "Linking %s to %s"%(src, trg)
-                    os.symlink(src, trg)
+                if not os.path.exists(dst_dir):
+                    os.makedirs(dst_dir)
+                
+                dst = pjoin(dst_dir, dst)
+
+                if not os.path.lexists(dst):
+                    os.symlink(src, pjoin(dst_dir, dst))
                 else:
-                    print "Target file %s exists; use -relink to overwrite"%trg
+                    print "Link %s already exists"%dst
             else:
                 print "Source file %s not found"%src
-    elif args.link:
-        print "Info file %s not found"%infofile
 
-# Structural Preprocessing
-# ------------------------
+            del group, name, extra_arg
 
-for subj in subjects:
-    sgescript = []
+def preprocess_anatomicals(data_dir, subject_list, types, stages):
+    """Write and submit a Sun Grid Engine script to preprocess anatomical images."""
 
-    # Run recon-all 
-    # ---------------
-    if args.recon and os.path.exists(os.path.join(datadir, subj, "mri/orig/001.mgz")):
-        # Make sure a recon hasn't been started for this subject
-        if not os.path.isfile(os.path.join(datadir, subj, "scripts/recon-all-status.log")) or args.forcerecon:
-            # Recon-all command line
-            sgescript.append("recon-all -s %s -all"%subj)
-            print "Adding %s recon job to SGE script"%subj
-        else:
-            print "Recon submission requested for %s, but recon status log exists"%subj
-    elif args.recon:
-        print "Recon submission requested for %s, but recon source image does not exist"%subj
+    for i, subj in enumerate(subject_list):
+        scan_type = types[i]
+        # Just bail out of this subject had a functional scan
+        if scan_type == "func":
+            continue
+        proc_list = []
+        subj_dir = pjoin(data_dir, subj)
+        if "recon" in stages:
+            # Check that the source image exists
+            if not os.path.exists(pjoin(subj_dir, "mri", "orig", "001.mgz")):
+                print "recon-all requested for %s, but MPRAGE image does not exist"%subj
+                continue
+            # Make sure a recon hasn't already been started for this subject
+            # (We'll need to add functionality to allow for forcing a restart)
+            if os.path.exists(pjoin(subj_dir, "scripts", "recon-all-status.log")):
+                print "recon-all requested for %s, but recon-all.status.log already exists"%subj
+                continue
+            
+            # Add the recon-all command to the processing list
+            proc_list.append("recon-all -s %s -all"%subj)
+
+        if "dwi" in stages:
+            # Figure out where the diffusion DICOM is
+            dicom_info_file = pjoin(subj_dir, "unpack", "%s-dicominfo.txt"%scan_type)
+            dicom_dir = pjoin(subj_dir, "dicom", scan_type)
+            info = run_info(dicom_info_file, dicom_dir)
+            # Info pops out as a tuple
+            names = info[3]
+            dicom_files = info[0]
+            try:
+                dwi_index = [s for s, n in enumerate(names) if n == "diffusion"][0]
+            except IndexError:
+                print "Could not find diffusion DICOM in scan info file for %s"%subj
+                continue
+            
+            # Here's the first element of the diffusion DICOM series
+            dwi_dicom = pjoin(dicom_dir, dicom_files[dwi_index])
+
+            # Specify the output dir
+            dwi_dir = pjoin(subj_dir, "dwi")
+
+            # Add the dt_recon command to the processing list
+            proc_list.append("dt_recon --i %s --s %s --o %s --no-tal"%(dwi_dicom, subj, dwi_dir))
+
+        if "norm" in stages:
+            # Check to make sure the recon-all source image exists at least.
+            # The actual source images for normalization actually get created
+            # during the reconstruction process, but this should be a bit safer.
+            if not os.path.exists(pjoin(subj_dir, "mri", "orig", "001.mgz")):
+                print "Spatial normalization requested for %s, but MPRAGE image does not exist"%subj
+                continue
+           
+            # Get a ref to the normalization script
+            norm_script = "/mindhive/gablab/fluid/Nipype_Code/fluid_normalize.py"
+            # Add the normalization command to the processing list
+            proc_list.append("python %s -s %s"%(norm_script, subj))
+
+        # Now, if we're supposed to be doing anything, tell the SGE to do it
+        if proc_list:
+            submit_to_sge(subj, proc_list)
+            
+            
+def submit_to_sge(subject_id, proc_list):
+    """Submit a list of commands to the Sun Grid Engine."""
+    # Make sure a directory exists for SGE stuff
+    sge_dir = pjoin(os.environ["HOME"], "sge")
+    if not os.path.exists(sge_dir):
+        os.mkdir(sge_dir)
+
+    # Open a qsub script and fill it with processing info
+    job_name = "%s_recon"%subject_id
+    qsub_script = pjoin(sge_dir, "%s_%s.sh"%(job_name, time.time()))
+    with open(qsub_script, "w") as q:
+        # qsub arguments
+        header = ["#! /bin/bash",
+                  "#$ -V",
+                  "#$ -cwd",
+                  "#$ -N %s"%job_name,
+                  "#$ -r y",
+                  "#$ -S /bin/bash",
+                  "\n"]
+        q.write("\n".join(header)) 
+        
+        # Brain processing
+        q.write("\n".join(proc_list))
     
-    # Unpack the DWI image with dt_recon
-    # ----------------------------------
-    infofile = os.path.join(datadir, subj, "unpack/%s-dicominfo.txt"%args.type)
-    if args.dwi and os.path.exists(infofile):
-        # Figure out of there's a diffusion acquisision in our dicoms
-        diffinfo = [i for i in parse_info_file(infofile, writeflf=False) if i[0]=="dwi"][0]
-        if diffinfo:
-            if args.debug:
-                print diffinfo
-            srcfile = os.path.join(datadir, subj, "dicom", args.type, diffinfo[1])
-            # Make sure srcfile exists
-            if os.path.exists(srcfile):
-                trgdir = os.path.join(datadir, subj, "dwi")
-                if not os.path.exists(trgdir):
-                    os.makedirs(trgdir)
-                # Check for this process by looking for the log file
-                if not os.path.exists(os.path.join(trgdir, "dt_recon.log")):
-                    # DT_recon command line
-                    sgescript.append("dt_recon --i %s --s %s --o %s --no-tal"%(srcfile, subj, trgdir))
-                    print "Adding %s dt_recon job to SGE script"%subj
-                else:
-                    print "dt_recon log found for %s; skipping dwi unpacking"%subj
-            else:
-                "DWI source DICOM not found for %s, skipping dwi unpacking"%subj
+    print "Submitting %s to Sun Grid Engine"%job_name
+    qsub_cmd = " ".join(["cd", sge_dir, ";", "qsub", "-q", "long.q", qsub_script])
 
-    # Perform spatial normalization
-    # -----------------------------
-    if args.norm and os.path.exists(os.path.join(datadir, subj, "mri/orig/001.mgz")):
-        # Fluid_register command line
-        sgescript.append(
-            "python /mindhive/gablab/fluid/Nipype_Code/fluid_normalize.py -s %s"%subj)
-        print "Adding %s normalization to SGE script"%subj
+    # And actually submit the job
+    subprocess.Popen(qsub_cmd, stderr=sys.stderr, env=os.environ, shell=True, cwd=sge_dir)
+    
+def compress_dicoms(data_dir, subject_list, types):
+    """Tar and gzip DICOM directories for a list of subjects."""
+
+    for i, subj in enumerate(subject_list):
+        scan_type = types[i]
         
-    # Actually submit to Sun Grid Engine
-    # ----------------------------------
-    if sgescript:
-        sgedir = os.path.join(os.getenv("HOME"), "sge")
-        if not os.path.exists(sgedir):
-            os.mkdir(sgedir)
-        # Write a script to give to qsub
-        scriptfile = os.path.join(sgedir, "%s_recon_%s.sh"%(subj, time.time()))
-        fid = open(scriptfile,"w")
-        fid.write("\n".join(["#! /bin/bash",
-                             "#$ -V",
-                             "#$ -cwd",
-                             "#$ -N %s_recon"%subj,
-                             "#$ -r y",
-                             "#$ -S /bin/bash",
-                             "\n"]))
-        fid.write("\n".join(sgescript))
-        fid.close()
-        if args.debug:
-            print "SGE Script: \n", open(scriptfile).read()
+        # Move to the subject's directory 
+        orig_dir = os.getcwd()
+        dicom_dir = pjoin(data_dir, subj, "dicom")
+        os.chdir(dicom_dir)
 
-        # Write the qsub command line
-        qsub = ["cd",sgedir,";","qsub","-q","long.q",scriptfile]
-        cmd = " ".join(qsub)
+        print "Compressing dicom directory for %s"%subj
+
+        # Tar the dicoms
+        tar_file = "%s.tar"%scan_type
+        dicom_glob = "/".join([scan_type, "*.dcm"])
+        tar_cmd = "tar -cWf %s %s"%(tar_file, dicom_glob)
+        os.system(tar_cmd)
         
-        # Submit the job
-        print "Submitting job %s_recon to Sun Grid Engine"%subj
-        proc = subprocess.Popen(cmd,
-                                stdout = subprocess.PIPE,
-                                stderr = subprocess.PIPE,
-                                env=os.environ,
-                                shell=True,
-                                cwd=sgedir)
-        stdout, stderr = proc.communicate()
-        if args.debug:
-            print stdout, stderr
+        # Compress them
+        zip_cmd = "gzip -f %s"%tar_file
+        os.system(zip_cmd)
 
-# Preprocess Fieldmaps
-# --------------------
-protocols = dict(full="func dti rest",func="func",struct="dti rest")
-if 0 and args.fieldmaps:
-    cmd = "/mindhive/gablab/fluid/Nipype_Code/prepare_fieldmaps.py "
-    cmd += " -s "
-    cmd += " ".join(subjects)
-    cmd += " -p " + protocols[args.type]
-    print "Preprocessing fieldmaps"
-    if args.debug:
-        cmd += " -v "
-        print "Fieldmap call:\n", cmd
-    os.system(cmd)
+        # And, if things seemed to work, remove the directory of files
+        zip_file =  "%s.gz"%tar_file
+        if os.path.exists(zip_file):
+            shutil.rmtree(scan_type)
+        else:
+            print "%s not created; DICOM directory will not be removed"%zip_file
+        
+        # Go back home
+        os.chdir(orig_dir)
+
+def parse_cmdline(arglist):
+    """Parse a list of arguments."""
+    parser = argparse.ArgumentParser(usage=("unpack_dicoms.py [options]"))
+    parser.add_argument("-subjects", nargs="*", metavar="subjid",
+                        help="list of subject ids to unpack")
+    parser.add_argument("-procs", nargs="*", metavar="stages",
+                        choices=["fetch","unpack","link","anat","recon","dwi","norm","zip"],
+                        help="processing stages to run")
+    parser.add_argument("-type", metavar="scantype", choices=["func", "struct", "full"],
+                        help="scan type - gets from # of dicoms if not specified")
+    parser.add_argument("-dontunpack", nargs="*", metavar="num", default=[], type=int,
+                        help="sequence number of run(s) to skip")
+    parser.add_argument("-relink", action="store_true",
+                        help="overwrite any old heuristic links")
+    parser.add_argument("-workingdir", help="specify working directoy")
+    parser.add_argument("-ipython", action="store_true",
+                        help="run in parallel using IPython")
+    
+    if len(arglist) < 2:
+        arglist.insert(0,"-h")
+    args = parser.parse_args(arglist)
+
+    return args
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

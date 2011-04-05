@@ -121,7 +121,7 @@ def is_moco(dcmfile):
     """Determine if a run has on-line motion correction"""
     import subprocess
     cmd = ['mri_probedicom', '--i', dcmfile, '--t', '8', '103e']
-    proc  = subprocess.Popen(cmd,
+   proc  = subprocess.Popen(cmd,
                              stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE)
     stdout, stderr = proc.communicate()
