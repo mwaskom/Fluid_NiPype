@@ -1,8 +1,12 @@
 import os
-from nipype.interfaces.base import TraitedSpec, File, traits
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from nipype.interfaces.base import (CommandLineInputSpec, CommandLine, TraitedSpec, BaseInterface,
+                                    OutputMultiPath, File, traits)
 from nipype.interfaces.fsl.base import FSLCommand, FSLCommandInputSpec
 from nipype.utils.filemanip import fname_presuffix
-
 
 class CheckRegInput(FSLCommandInputSpec):
     
@@ -66,3 +70,57 @@ class TimeSeriesMovie(FSLCommand):
         return None
 
 
+class XCorrCoefInput(TraitedSpec):
+
+    design_matrix = File(exists=True,mandatory=True,desc="FEAT design matrix")
+
+class XCorrCoefOutput(TraitedSpec):
+
+    corr_png = File(exists=True,desc="graphical representation of design correlaton matrix")
+
+class XCorrCoef(BaseInterface):
+
+    input_spec = XCorrCoefInput
+    output_spec = XCorrCoefOutput
+
+    def _run_interface(self, runtime):
+        
+        X = np.loadtxt(self.inputs.design_matrix, skiprows=5)
+
+        plt.imshow(np.corrcoef(X.T), interpolation="nearest", vmin=-1, vmax=1)
+        plt.colorbar()
+        plt.savefig("xcorrcoef.png")
+
+        runtime.returncode=0
+        return runtime
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        outputs["corr_png"] = os.path.join(os.getcwd(), "xcorrcoef.png")
+        return outputs
+
+
+class MayaviShotsInputSpec(CommandLineInputSpec):
+    
+    server_args = traits.Str('"-screen 0 1024x768x24"', position=-4, usedefault=True, argstr="--server-args=%s")
+    mayavi_script = File("/mindhive/gablab/u/mwaskom/mayavi_shots.py", position=-3, usedefault=True, argstr="%s")
+    hemi = traits.Str(position=-2, argstr="%s")
+    in_file = File(exists=True, mandatory=True, position=-1, argstr="%s")
+
+class MayaviShotsOutputSpec(TraitedSpec):
+
+    snapshots = OutputMultiPath()
+
+class MayaviShots(CommandLine):
+
+    _cmd = "/mindhive/gablab/u/mwaskom/xvfb-run"
+    input_spec = MayaviShotsInputSpec
+    output_spec = MayaviShotsOutputSpec
+
+    def _list_outputs(self):
+        outputs = self._outputs().get()
+        outputs['snapshots'] = [os.path.join(os.getcwd(),
+                                             "%s-%s.png"%(self.inputs.hemi, v)) for v in ["ant","lat",
+                                                                                          "post","med"]]
+        return outputs
