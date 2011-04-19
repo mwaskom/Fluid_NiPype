@@ -3,6 +3,7 @@ from nipype.interfaces import fsl
 import nipype.interfaces.utility as util
 import nipype.pipeline.engine as pe
 
+from .iterfaces import XCorrCoef
 from .utility import OutputConnector
 
 def get_model_workflow(name="model"):
@@ -27,7 +28,7 @@ def get_model_workflow(name="model"):
                         name="modelspec")
 
     # Generate FSL-style model information
-    level1design = pe.Node(fsl.Level1Design(model_serial_correlations="AR(1)"),
+    level1design = pe.Node(fsl.Level1Design(model_serial_correlations=True),
                            name="level1design")
 
     # Use model information to create fsf files
@@ -35,6 +36,11 @@ def get_model_workflow(name="model"):
                           overwrite = False,
                           iterfield = ["fsf_file","ev_files"],
                           name="featmodel")
+
+    # Generate a plot of stimulus correlation
+    xcorrcoef = pe.MapNode(XCorrCoef(),
+                           iterfield = ["design_matrix"],
+                   name="xcorrcoef")
 
     # Use film_gls to estimate the model
     modelestimate = pe.MapNode(fsl.FILMGLS(smooth_autocorr=True,
@@ -60,7 +66,8 @@ def get_model_workflow(name="model"):
 
     # Estimate contrasts from the parameter effect size images
     contrastestimate = pe.MapNode(fsl.ContrastMgr(), name="contrastestimate",
-                                  iterfield = ["tcon_file","stats_dir"])
+                                  iterfield = ["tcon_file","dof_file", "corrections",
+                                               "param_estimates", "sigmasquareds"])
 
     # This node will iterate over each contrast for reporting
     # (The iterables must be set elsewhere, as this workflow is 
@@ -84,8 +91,11 @@ def get_model_workflow(name="model"):
     # Define the workflow outputs
     outputnode = pe.Node(util.IdentityInterface(fields=["results",
                                                         "design_image",
-                                                        "design_covariance",
+                                                        "stimulus_correlation",
                                                         "sigmasquareds",
+                                                        "copes",
+                                                        "varcopes",
+                                                        "zstats",
                                                         "zstat"]),
                          name="outputspec")
 
@@ -109,6 +119,7 @@ def get_model_workflow(name="model"):
                                                 ("ev_files", "ev_files")]),
         (featmodel,         modelestimate,     [("design_file","design_file")]),
         (featmodel,         contrastestimate,  [("con_file","tcon_file")]),
+        (featmodel,         xcorrcoef,         [("design_file", "design_matrix")])
         (contrastestimate,  selectcontrast,    [(("zstats", con_sort),"inlist")]),
         (modelestimate,     threshres,         [("sigmasquareds","in_file")]),
         (inputnode,         overlayres,        [("overlay_background", "background_image")]),
@@ -117,13 +128,19 @@ def get_model_workflow(name="model"):
         (inputnode,         sliceres,          [(("overlay_background", get_sampling_rate), "sample_axial"),
                                                 (("overlay_background", get_image_width), "image_width")]),
         (overlayres,        sliceres,          [("out_file", "in_file")]),
-        (modelestimate,     contrastestimate,  [("results_dir","stats_dir")]),
+        (modelestimate,     contrastestimate,  [("dof_file", "dof_file"),
+                                                ("corrections", "corrections"),
+                                                ("param_estimates", "param_estimates"),
+                                                ("sigmasquareds", "sigmasquareds")]),
         (selectcontrast,    overlaystats,      [("out","stat_image")]),
         (inputnode,         overlaystats,      [("overlay_background", "background_image")]),
         (overlaystats,      slicestats,        [("out_file", "in_file")]),
         (inputnode,         slicestats,        [(("overlay_background", get_sampling_rate), "sample_axial"),
                                                 (("overlay_background", get_image_width), "image_width")]),
         (modelestimate,     outputnode,        [("results_dir", "results")]),
+        (contrastestimate,  outputnode,        [("copes", "copes"),
+                                                ("varcopes", "varcopes"),
+                                                ("zstats", "zstats")]),
         ])
 
     # Use a utility class (defined in utility module) to control renaming 
@@ -131,7 +148,7 @@ def get_model_workflow(name="model"):
     rename = OutputConnector(model, outputnode)
     
     rename.connect(featmodel, "design_image", "design_image")
-    rename.connect(featmodel, "design_covariance", "design_cov")
+    rename.connect(xcorrcoef, "stimulus_correlation", "corr_png")
     rename.connect(sliceres,  "sigmasquareds")
     rename.connect(slicestats, "zstat")
 
