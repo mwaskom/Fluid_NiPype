@@ -119,7 +119,7 @@ def get_model_workflow(name="model"):
                                                 ("ev_files", "ev_files")]),
         (featmodel,         modelestimate,     [("design_file","design_file")]),
         (featmodel,         contrastestimate,  [("con_file","tcon_file")]),
-        (featmodel,         xcorrcoef,         [("design_file", "design_matrix")])
+        (featmodel,         xcorrcoef,         [("design_file", "design_matrix")]),
         (contrastestimate,  selectcontrast,    [(("zstats", con_sort),"inlist")]),
         (modelestimate,     threshres,         [("sigmasquareds","in_file")]),
         (inputnode,         overlayres,        [("overlay_background", "background_image")]),
