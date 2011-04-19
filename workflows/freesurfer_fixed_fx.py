@@ -1,9 +1,9 @@
 import nipype.interfaces.freesurfer as fs
 import nipype.interfaces.utility as util
 import nipype.pipeline.engine as pe
+#from .interfaces import MayaviShots
 
-
-def get_freesurfer_fixed_fx_workflow(name="fixed_fx", volume_report=True):
+def get_freesurfer_fixed_fx_workflow(name="fixed_fx"):
 
     # Define the workflow
     fixed_fx = pe.Workflow(name=name)
@@ -12,7 +12,8 @@ def get_freesurfer_fixed_fx_workflow(name="fixed_fx", volume_report=True):
     inputnode = pe.Node(util.IdentityInterface(fields=["hemi",
                                                        "cope", 
                                                        "varcope",
-                                                       "dof_file"]),
+                                                       "dof_file",
+                                                       "subject_id"]),
                         name="inputspec")
 
     # Concatenate the copes and varcopes for each run
@@ -29,12 +30,16 @@ def get_freesurfer_fixed_fx_workflow(name="fixed_fx", volume_report=True):
 
     # Run a fixed-effects analysis using mri_glmfit
     glmfit = pe.Node(fs.GLMFit(one_sample=True,
+                               surf=True,
                                cortex=True,
-                               
                                glm_dir="stats"),
                      name="glmfit")
 
-    outputnode = pe.Node(util.IdentityInterface(fields=["stats"]),
+    # Stats screenshots
+#    snapshots = pe.Node(MayaviShots(),
+#                        name="snapshots")
+
+    outputnode = pe.Node(util.IdentityInterface(fields=["stats"]),#,"snapshots"]),
                          name="outputspec")
 
     fixed_fx.connect([
@@ -44,14 +49,15 @@ def get_freesurfer_fixed_fx_workflow(name="fixed_fx", volume_report=True):
         (copemerge,    glmfit,       [("concatenated_file", "in_file")]),
         (varcopemerge, glmfit,       [("concatenated_file", "fixed_fx_var")]),
         (getdof,       glmfit,       [("dof", "fixed_fx_dof")]),
-        (inputnode,    glmfit,       [(("hemi", get_surf_def), "surf")]),
+        (inputnode,    glmfit,       [("hemi", "hemi"),
+                                      ("subject_id", "subject_id")]),
+#        (glmfit,       snapshots,    [("sig_file", "in_file")]),
+#        (inputnode,    snapshots,    [("hemi", "hemi")]),
         (glmfit,       outputnode,   [("glm_dir", "stats")]),
+#        (snapshots,    outputnode,   [("snapshots", "snapshots")]),
         ])
 
     return fixed_fx, inputnode, outputnode    
-
-def get_surf_def(hemi):
-    return ("fsaverage", hemi, "white")
 
 def get_dof_func(doffiles):
 

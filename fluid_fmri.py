@@ -3,6 +3,8 @@
 Main interface for GFluid fMRI Nipype code.
 """
 import os
+import sys
+import shutil
 import argparse
 import inspect
 from tempfile import mkdtemp
@@ -26,6 +28,8 @@ parser = argparse.ArgumentParser(description="Main interface for GFluid fMRI Nip
 
 parser.add_argument("-paradigm", metavar="paradigm", 
                     help="experimental paradigm")
+parser.add_argument("-altmodel", metavar="model",
+                    help="alternate model")
 parser.add_argument("-s", "-subjects", nargs="*", dest="subjects",
                     metavar="subject_id",
                     help="process subject(s)")
@@ -34,6 +38,8 @@ parser.add_argument("-workflows", nargs="*",
                     help="which workflows to run")
 parser.add_argument("-surface", action="store_true",
                     help="run processing for surface analysis")
+parser.add_argument("-native", action="store_true",
+                    help="run fixed effect analysis on native surface")
 parser.add_argument("-norun",dest="run",action="store_false",
                     help="do not run the pypeline")
 parser.add_argument("-ipython",action="store_true",
@@ -48,16 +54,27 @@ default_paradigm = "iq"
 # Dynamically import the experiment file
 if args.paradigm is None:
     args.paradigm = default_paradigm
+
+# Set the experiment name
+if args.altmodel is None:
+    experiment_name = args.paradigm
+else:
+    experiment_name = "-".join([args.paradigm, args.altmodel])
+
 # Look for paradgim.py in an experiments package
 try:   
-    exp = __import__("experiments." + args.paradigm,
+    exp = __import__("experiments." + experiment_name,
                      fromlist=["experiments"])
 # Or maybe just get it from the current directory
 except ImportError:
-    exp = __import__(args.paradigm)
+    exp = __import__(experiment_name)
 
 if args.workflows is None:
     args.workflows = []
+
+# Can't do preproc and altmodel
+if args.altmodel is not None and (args.workflows == "preproc" or args.workflows == "all"):
+    sys.exit("Preprocessing cannot be performed with alternate model")
 
 # Determine the subjects list
 # Hierarchy:
@@ -87,8 +104,8 @@ if args.tempdir:
     project_dir = mkdtemp(prefix="nipype-")
     print "Temporary directory: %s"%project_dir 
 
-analysis_dir = os.path.join(project_dir, "Analysis/Nipype", args.paradigm)
-working_dir = os.path.join(project_dir, "Analysis/Nipype/workingdir", args.paradigm)
+analysis_dir = os.path.join(project_dir, "Analysis/Nipype", experiment_name)
+working_dir = os.path.join(project_dir, "Analysis/Nipype/workingdir", experiment_name)
 
 # Smoothing kernel
 # Currently used for both volume and surface
@@ -104,7 +121,7 @@ except OSError:
 os.environ["SUBJECTS_DIR"] = data_dir
 
 # Figure out the space we're working in
-if args.surface:
+if args.surface or args.native:
     space = "surface"
 else:
     space = "volume"  
@@ -444,6 +461,10 @@ infields = ["subject_id", "contrast", "space"]
 if space == "surface":
     infields.append("hemi")
 
+if args.native:
+    space = "native"
+definespace.iterables = ("space", ["native"])
+
 # Fixed fx datasource
 ffxsource = pe.Node(nio.DataGrabber(infields=infields,
                                     outfields=["cope",
@@ -460,9 +481,7 @@ if space == "volume":
     ffxsource.inputs.template_args = dict(cope=[["subject_id", "contrast", "cope"]],
                                           varcope=[["subject_id", "contrast", "varcope"]],
                                           dof_file=[["subject_id"]])
-elif space == "surface":
-    ffxsource.inputs.template = "".join(
-        ["%s/registration/%s/run_?/%s.%s.","fsaverage_smooth%d.nii.gz"%smooth_fwhm])
+else:
     ffxsource.inputs.field_template = dict(dof_file="%s/model/unsmoothed/run_?/dof")
     ffxsource.inputs.template_args = dict(cope=[["subject_id", "contrast", "hemi", "cope"]],
                                           varcope=[["subject_id", "contrast", "hemi", "varcope"]],
@@ -471,6 +490,15 @@ elif space == "surface":
                          iterables=("hemi", ["lh", "rh"]),
                          name="hemisource")
     fixed_fx.connect(hemisource, "hemi", ffxsource, "hemi")
+
+if space == "surface":
+    ffxsource.inputs.template = "".join(
+        ["%s/registration/%s/run_?/%s.%s.","fsaverage_smooth%d.nii.gz"%smooth_fwhm])
+    ffx_input.inputs.subject_id = "fsaverage"
+elif space == "native":
+    ffxsource.inputs.template = "".join(
+        ["%s/registration/%s/run_?/%s.%s","_smooth%d.mgz"%smooth_fwhm])
+    fixed_fx.connect(subjectsource, "subject_id", ffx_input, "subject_id")
 
 def make_list(f):
     if not isinstance(f, list):
@@ -536,9 +564,27 @@ def workflow_runner(wf, stem):
             wf.run(plugin="Linear")
         report()
 
+def setup_altmodel():
+    for subj in subject_list:
+        preproc_dir = pjoin(analysis_dir[:-(len(args.altmodel)+1)], subj, "preproc")
+        if not os.path.exists(preproc_dir):
+            sys.exit("Preproc dir %s does not exist"%preproc_dir)
+        target = pjoin(analysis_dir, subj, "preproc")
+        try:
+            shutil.rmtree(target)
+        except OSError:
+            pass
+        try:
+            os.makedirs(pjoin(analysis_dir, subj))
+        except OSError:
+            pass
+        os.symlink(preproc_dir, target)
+
 if __name__ == "__main__":
     if args.run:
         workflow_runner(preproc, "preproc")
+        if args.altmodel is not None:
+            setup_altmodel()
         workflow_runner(model, "model")
         workflow_runner(registration, "reg")
         workflow_runner(fixed_fx, "ffx")
