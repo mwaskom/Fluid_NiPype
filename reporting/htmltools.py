@@ -67,8 +67,21 @@ class HTMLReport(object):
             self._fid.write("\n<a href=%s>%s</a>"%(link_template%val, title_template%val))
         self._fid.write("</p")
     
-    def write_image(self, image):
+    def write_image(self, image, size=None):
 
-        self._fid.write("<br>\n<a href=%s><IMG BORDER=0 SRC=%s ></a><br>\n"%(image, image))
+        if size is None:
+            self._fid.write("<br>\n<a href=%s><IMG BORDER=0 SRC=%s ></a><br>\n"%(image, image))
+        else:
+            self._fid.write("<br>\n"
+                            "<a href=%s><IMG BORDER=0 SRC=%s WIDTH=\"%d\" HEIGHT=\"%d\" ></a><br>\n"%(image,image,size[0],size[1]))
 
-
+    def write_images_across(self, images, size=None):
+        
+        self.newline()
+        for image in images:
+            if size is None:
+                self._fid.write("\n<a href=%s><IMG BORDER=0 SRC=%s ></a>\n"%(image, image))
+            else:
+                self._fid.write("\n"
+                                "<a href=%s><IMG BORDER=0 SRC=%s WIDTH=\"%d\" HEIGHT=\"%d\" ></a>\n"%(image,image,size[0],size[1]))
+        self.newline()

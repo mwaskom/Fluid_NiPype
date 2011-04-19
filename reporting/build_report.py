@@ -399,12 +399,24 @@ def write_ffx_report(html, subj, paradigm):
     srcdir = os.path.join(ANALYSIS_DIR,paradigm,subj,"fixed_fx", "volume")
     contrasts = [p.split("/")[-1] for p in glob(os.path.join(srcdir,"*"))]
     contrasts.sort()
+    html.newline()
+    html.write_section_head("Volume")
     for contrast in contrasts:
         html.newline()
         html.write_text(contrast)
         html.write_image(os.path.join(srcdir,contrast,"zstat.png"))
         html.newline()
-
+    srcdir = os.path.join(ANALYSIS_DIR,paradigm,subj,"fixed_fx", "surface")
+    contrasts = [p.split("/")[-1] for p in glob(os.path.join(srcdir,"*"))]
+    html.newline()
+    html.write_section_head("Surface")
+    for contrast in contrasts:
+        html.newline()
+        html.write_text(contrast)
+        for hemi in ["lh", "rh"]:
+            html.write_images_across([os.path.join(srcdir,contrast,hemi,"%s-%s.png"%(hemi, view)) \
+                                        for view in ["lat", "med", "post"]], (300,300))
+        html.newline()
 
 def write_homepage():
     
