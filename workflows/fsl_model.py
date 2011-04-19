@@ -3,7 +3,7 @@ from nipype.interfaces import fsl
 import nipype.interfaces.utility as util
 import nipype.pipeline.engine as pe
 
-from .iterfaces import XCorrCoef
+from .interfaces import XCorrCoef
 from .utility import OutputConnector
 
 def get_model_workflow(name="model"):
