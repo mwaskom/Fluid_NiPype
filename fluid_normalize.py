@@ -130,4 +130,4 @@ normalize.connect([
     ])
 
 if __name__ == "__main__" and args.pype:
-    normalize.run(inseries=args.inseries)
+    normalize.run()
