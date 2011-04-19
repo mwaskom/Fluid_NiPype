@@ -19,11 +19,14 @@ from os.path import join as pjoin
 import subprocess
 import argparse
 from glob import glob
+import numpy as np
 
 import nipype.interfaces.utility as util
 import nipype.interfaces.io as io
 import nipype.interfaces.freesurfer as fs
 import nipype.pipeline.engine as pe
+
+from fluid_utility import archive_crashdumps
 
 def main(arglist):
 
@@ -53,6 +56,11 @@ def main(arglist):
         # Get the unpacking workflow
         unpacker = get_unpack_workflow(s_list)
 
+        # Set the base directory
+        # XXX running in /tmp doesn't work with IPython but let's make it
+        # so that this gets removed
+        unpacker.base_dir = pjoin(data_dir, "unpacking")
+
         # Feed some information into the workflow
         unpacker.inputs.flowinfo.data_dir = data_dir
         unpacker.inputs.flowinfo.dont_unpack = args.dontunpack
@@ -64,6 +72,9 @@ def main(arglist):
         # Possibly set the working directory
         if args.workingdir is not None:
             unpacker.base_dir = args.workingdir
+
+        # Archive crashdumps
+        archive_crashdumps(unpacker)
         
         # Run the workflow
         if args.ipython:
@@ -71,6 +82,10 @@ def main(arglist):
         else:
             plugin = "Linear"
         unpacker.run(plugin=plugin)
+    
+    if doall or "cache" in args.procs:
+        # Cache the runinfo to a .npy file
+        cache_run_info(data_dir, s_list, types, args.dontunpack)
 
     if doall or "link" in args.procs:
         # Create heuristic symlinks to the converted files
@@ -391,7 +406,7 @@ def run_info(info_file, dicom_dir, dont_unpack=[]):
         del dcmfile, group, seqn, name, ftype, arg
         
     return files, groups, seqs, names, ftypes, args
-    
+
 def is_moco(dcmfile):
     """Determine if a run has on-line motion correction."""
     import sys
@@ -399,7 +414,7 @@ def is_moco(dcmfile):
     cmd = ['mri_probedicom', '--i', dcmfile, '--t', '8', '103e']
     proc  = subprocess.Popen(cmd,
                              stdout=subprocess.PIPE,
-                             stderr=sys.stderr)
+                             stderr=subprocess.PIPE)
     stdout = proc.communicate()[0]
     return stdout.strip().startswith('MoCoSeries')
 
@@ -410,7 +425,7 @@ def get_fmap_type(dcmfile):
     cmd = ["mri_probedicom", "--i", dcmfile, "--t", "8", "8"]
     proc = subprocess.Popen(cmd,
                             stdout=subprocess.PIPE,
-                            stderr=sys.stderr)
+                            stderr=subprocess.PIPE)
     stdout = proc.communicate()[0]
     if stdout.strip()[-4] == "M":
         return "mag"
@@ -487,17 +502,31 @@ def rename_info_file(scan_type, info_file):
     symlink(info_file, dst)
     return dst
 
+def cache_run_info(data_dir, subject_list, types, dontunpack=[]):
+    """Write a numpy array of run info to be used after dicoms are zipped."""
+    for i, subj in enumerate(subject_list):
+        type = types[i]
+        dicom_dir = pjoin(data_dir, subj, "dicom", type)
+        info_file = pjoin(data_dir, subj, "unpack", "%s-dicominfo.txt"%type)
+        infoarr = np.array(run_info(info_file, dicom_dir, dontunpack))
+        cache_file = pjoin(data_dir, subj, "unpack", "%s-infocache.npy"%type)
+        np.save(cache_file, infoarr)
+
+def load_info_cache(cache_file):
+    """Load cached run info."""
+    info = np.load(cache_file)
+    return tuple([a.squeeze() for a in np.split(info,6)])
+
 def make_symlinks(data_dir, subject_list, scan_types, dont_unpack=[]):
     """Create symlinks with heurtistic names to unpacked files."""
 
     for i, subj in enumerate(subject_list):
         scan_type = scan_types[i]
         subj_dir = pjoin(data_dir, subj)
-        dicom_dir = pjoin(subj_dir, "dicom", scan_type)
-        info_file = pjoin(subj_dir, "unpack", "%s-dicominfo.txt"%scan_type)
         
-        # Call the run_info function to get lists of information
-        files, groups, seqs, names, ftypes, args = run_info(info_file, dicom_dir, dont_unpack)
+        # Read the cached info data to get arrays of information
+        cache_file = pjoin(data_dir, subj, "unpack", "%s-infocache.npy"%scan_type)
+        files, groups, seqs, names, ftypes, args = load_info_cache(cache_file)
 
         # Make a functional hash to deal with multiple runs
         bold_hash = dict(IQ=1,NBack=1,MOT_Block=1,MOT_Jitter=1)
@@ -511,6 +540,7 @@ def make_symlinks(data_dir, subject_list, scan_types, dont_unpack=[]):
             name = names[j]
             extra_arg = args[j]
 
+            seq = int(seq)
             # Define the source image
             if group == "flash" and extra_arg:
                 echo = int(extra_arg[-1])
@@ -592,9 +622,9 @@ def preprocess_anatomicals(data_dir, subject_list, types, stages):
 
         if "dwi" in stages:
             # Figure out where the diffusion DICOM is
-            dicom_info_file = pjoin(subj_dir, "unpack", "%s-dicominfo.txt"%scan_type)
             dicom_dir = pjoin(subj_dir, "dicom", scan_type)
-            info = run_info(dicom_info_file, dicom_dir)
+            cache_file = pjoin(data_dir, subj, "unpack", "%s-infocache.npy"%scan_type)
+            info = load_info_cache(cache_file)
             # Info pops out as a tuple
             names = info[3]
             dicom_files = info[0]
@@ -659,7 +689,7 @@ def submit_to_sge(subject_id, proc_list):
     qsub_cmd = " ".join(["cd", sge_dir, ";", "qsub", "-q", "long.q", qsub_script])
 
     # And actually submit the job
-    proc = subprocess.Popen(qsub_cmd, stdout=subprocess.PIPE, stderr=sys.stderr, 
+    proc = subprocess.Popen(qsub_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
                             env=os.environ, shell=True, cwd=sge_dir)
     
     proc.communicate()
@@ -703,7 +733,7 @@ def parse_cmdline(arglist):
     parser.add_argument("-subjects", nargs="*", metavar="subjid",
                         help="list of subject ids to unpack")
     parser.add_argument("-procs", nargs="*", metavar="stages",
-                        choices=["fetch","unpack","link","anat","recon","dwi","norm","zip"],
+                        choices=["fetch","unpack","cache","link","anat","recon","dwi","norm","zip"],
                         help="processing stages to run")
     parser.add_argument("-type", metavar="scantype", choices=["func", "struct", "full"],
                         help="scan type - gets from # of dicoms if not specified")
