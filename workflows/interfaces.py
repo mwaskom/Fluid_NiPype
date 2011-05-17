@@ -86,9 +86,9 @@ class XCorrCoef(BaseInterface):
     def _run_interface(self, runtime):
         
         X = np.loadtxt(self.inputs.design_matrix, skiprows=5)
-
-        plt.imshow(np.corrcoef(X.T), interpolation="nearest", vmin=-1, vmax=1)
-        plt.colorbar()
+        f = plt.figure()
+        ax = f.add_subplot(111)
+        ax.matshow(np.corrcoef(X.T), vmin=-1, vmax=1)
         plt.savefig("xcorrcoef.png")
 
         runtime.returncode=0

@@ -33,7 +33,6 @@ def get_model_workflow(name="model"):
 
     # Use model information to create fsf files
     featmodel = pe.MapNode(fsl.FEATModel(), 
-                          overwrite = False,
                           iterfield = ["fsf_file","ev_files"],
                           name="featmodel")
 
