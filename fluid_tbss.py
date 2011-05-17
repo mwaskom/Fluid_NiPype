@@ -2,6 +2,7 @@
 import os
 from os.path import join as pjoin
 import argparse
+import numpy as np
 
 import nipype.interfaces.fsl as fsl
 import nipype.interfaces.freesurfer as fs
@@ -17,7 +18,7 @@ parser = argparse.ArgumentParser(description="Nipype script to run augmented-TBS
 parser.add_argument("-subjects", nargs="*",
                     metavar="subject_id",
                     help="process subject(s)")
-parser.add_argument("-workflows", nargs="*", metavar="<wf>",
+parser.add_argument("-workflows", nargs="*", metavar="<wf>", choices=["reg","skel","all"],
                     help="which workflows to run")
 parser.add_argument("-groupfile", metavar="<file>",
                     help="text file of subject ids to include in group analysis")
@@ -25,8 +26,8 @@ parser.add_argument("-clgroup", action="store_true",
                     help="command-line subject list defines group")
 parser.add_argument("-r1", action="store_true",
                     help="processes and project R1 values")
-parser.add_argument("-inseries",action="store_true",
-                    help="force running in series")
+parser.add_argument("-ipython",action="store_true")
+parser.add_argument("-multiproc",action="store_true")
 args = parser.parse_args()
 
 # Set up some paths
@@ -36,9 +37,17 @@ nipype_dir = pjoin(project_dir, "Analysis/Nipype")
 analysis_dir = pjoin(nipype_dir, "tbss")
 working_dir = pjoin(nipype_dir, "workingdir", "tbss")
 
+if not os.path.exists(analysis_dir):
+    os.makedirs(analysis_dir)
+
+if os.path.isfile(args.subjects[0]):
+    subjects = np.loadtxt(args.subjects[0],str).tolist()
+else:
+    subjects = args.subjects
+
 # Set up a node to supply subject ids
 subjsource = pe.Node(util.IdentityInterface(fields=["subject_id"]),
-                     iterables=("subject_id", args.subjects),
+                     iterables=("subject_id", subjects),
                      name="subjectsource")
 
 #---------------------------------------------------------------------#
@@ -177,16 +186,19 @@ if args.r1:
     outfields.append("r1_images")
 
 # Grab all of the normalized single-subject FA images in a sorted list
-skelgrabber = pe.Node(nio.DataGrabber(outfields=outfields,
+skelgrabber = pe.MapNode(nio.DataGrabber(infields=["subject_id"],
+                                      outfields=outfields,
                                       base_directory=analysis_dir,
                                       sort_filelist=True,
-                                      template="gf??/%s.nii.gz"),
+                                      template="%s/%s.nii.gz"),
+                       iterfield=["subject_id"],
                        name="skelgrabber")
-skelgrabber.inputs.template_args = dict(fa_images=[["fa"]])
+skelgrabber.inputs.template_args = dict(fa_images=[["subject_id", "fa"]])
 if args.r1:
-    skelgrabber.inputs.template_args["r1_images"] = [["R1"]]
+    skelgrabber.inputs.template_args["r1_images"] = [["subject_id", "R1"]]
 # This seems suboptimal but it appears not to cascade
 skelgrabber.overwrite=True
+skelgrabber.inputs.subject_id = subjects
 
 # Merge the FA files into a 4D file
 mergefa = pe.Node(fsl.Merge(dimension="t"), name="mergefa")
@@ -272,7 +284,7 @@ def check_subjects(filelist):
 
 # And connect it up
 skeletor.connect([
-    (skelgrabber,     mergefa,         [(("fa_images", check_subjects), "in_files")]),
+    (skelgrabber,     mergefa,         [("fa_images", "in_files")]),
     (mergefa,         meanfa,          [("merged_file", "in_file")]),
     (meanfa,          makeskeleton,    [("out_file", "in_file")]),
     (makeskeleton,    skeletonmask,    [("skeleton_file", "in_file")]),
@@ -289,7 +301,7 @@ skeletor.connect([
 
 if args.r1:
     skeletor.connect([
-        (skelgrabber,     merger1,         [(("r1_images", check_subjects), "in_files")]),
+        (skelgrabber,     merger1,         [("r1_images", "in_files")]),
         (merger1,         projectr1,       [("merged_file", "alt_data_file")]),
         (meanfa,          projectr1,       [("out_file", "in_file")]),
         (mergefa,         projectr1,       [("merged_file", "data_file")]),
@@ -297,9 +309,14 @@ if args.r1:
         (projectr1,       skeletonsink,    [("projected_data", "@projected_r1")]),
         ])
 
+if args.ipython:
+    plugin = "IPython"
+elif args.multiproc:
+    plugin="MultiProc"
+
 def workflow_runner(flow, stem):
     if any([a.startswith(stem) for a in args.workflows]) or args.workflows==["all"]:
-        flow.run(inseries=args.inseries)
+        flow.run(plugin=plugin)
 
 if __name__ == "__main__":
     # Run some things

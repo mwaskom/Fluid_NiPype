@@ -6,11 +6,14 @@ import os
 from os.path import join as pjoin
 import sys
 import argparse
+from numpy import loadtxt
 
 import nipype.pipeline.engine as pe
 import nipype.interfaces.io as nio
 import nipype.interfaces.freesurfer as fs
 import nipype.interfaces.utility as util
+
+from fluid_utility import archive_crashdumps
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description=__doc__)
@@ -23,15 +26,22 @@ parser.add_argument("-workflows", nargs="*",
 parser.add_argument("-fwhm", nargs="*",
                     type=float,
                     help="smoothing kernel")
-parser.add_argument("-metric", nargs="*",
-                    help="metric to use")
-parser.add_argument("-inseries",action="store_true",
-                    help="force running in series")
+parser.add_argument("-measure", nargs="*",
+                    help="measure to use")
+parser.add_argument("-ipython",action="store_true",
+                    help="run in parallel with IPython plugin")
+parser.add_argument("-multiproc", action="store_true",
+                    help="run in parallel with MultiProcessing")
 args = parser.parse_args()
 
-for metric in args.metric:
-    if metric not in ["thickness", "jacobian_white", "curv", "sulc"]:
-        sys.exit("%s is not a valid metric"%metric)
+for meas in args.measure:
+    if meas not in ["thickness", "jacobian_white", "curv", "sulc"]:
+        sys.exit("%s is not a valid measure"%measure)
+
+if args.subjects and os.path.isfile(args.subjects[0]):
+    subjects = loadtxt(args.subjects[0], str).tolist()
+else:
+    subjects = args.subjects
 
 
 project_dir = "/mindhive/gablab/fluid/"
@@ -45,7 +55,7 @@ except OSError:
     pass
 
 subjsource = pe.Node(util.IdentityInterface(fields=["subject_id"]),
-                     iterables=("subject_id", args.subjects),
+                     iterables=("subject_id", subjects),
                      name="subjectsource")
 
 hemisource = pe.Node(util.IdentityInterface(fields=["hemi"]),
@@ -57,7 +67,7 @@ fwhmsource = pe.Node(util.IdentityInterface(fields=["fwhm"]),
                      name="fwhmsource")
 
 metricsource = pe.Node(util.IdentityInterface(fields=["metric"]),
-                       iterables=("metric",args.metric),
+                       iterables=("metric",args.measure),
                        name="metricsource")
 
 surfgrabber = pe.Node(nio.DataGrabber(infields=["subject_id", "metric", "hemi"],
@@ -129,8 +139,17 @@ merge.connect([
     (rename,        mergesink,     [(("out", get_formatted_name), "substitutions")])
     ])
 
+archive_crashdumps(preproc)
+archive_crashdumps(merge)
+
 if __name__ == "__main__":
+    if args.ipython:
+        plugin="IPython"
+    elif args.multiproc:
+        plugin="MultiProc"
+    else:
+        plugin="Linear"
     if "preproc" in args.workflows:
-        preproc.run(inseries=args.inseries)
+        preproc.run(plugin=plugin)
     if "merge" in args.workflows:
-        merge.run(inseries=args.inseries)
+        merge.run(plugin=plugin)

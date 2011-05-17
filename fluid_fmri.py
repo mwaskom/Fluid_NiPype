@@ -10,6 +10,9 @@ import inspect
 from tempfile import mkdtemp
 from os.path import join as pjoin
 
+import matplotlib as mpl
+mpl.use("Agg")
+
 import nipype.pipeline.engine as pe
 import nipype.interfaces.io as nio
 from nipype.interfaces import fsl
@@ -44,6 +47,8 @@ parser.add_argument("-norun",dest="run",action="store_false",
                     help="do not run the pypeline")
 parser.add_argument("-ipython",action="store_true",
                     help="run in parallel using IPython")
+parser.add_argument("-multiproc",action="store_true",
+                    help="run in parallel using Multiprocessing")
 parser.add_argument("-tempdir",action="store_true",
                     help="write all output to temporary directory")
 args = parser.parse_args()
@@ -463,7 +468,7 @@ if space == "surface":
 
 if args.native:
     space = "native"
-definespace.iterables = ("space", ["native"])
+definespace.iterables = ("space", [space])
 
 # Fixed fx datasource
 ffxsource = pe.Node(nio.DataGrabber(infields=infields,
@@ -560,6 +565,8 @@ def workflow_runner(wf, stem):
     if any([arg for arg in args.workflows if arg.startswith(stem)]) or "all" in args.workflows:
         if args.ipython:
             wf.run(plugin="IPython")
+        elif args.multiproc:
+            wf.run(plugin="MultiProc")
         else:
             wf.run(plugin="Linear")
         report()

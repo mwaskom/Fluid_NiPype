@@ -21,8 +21,8 @@ parser.add_argument("-subjects", nargs="*",
                     help="process subject(s)")
 parser.add_argument("-nopype", dest="pype", action="store_false",
                     help="don't run the normalization workflow")
-parser.add_argument("-parallel", dest="inseries", action="store_false", 
-                    help="run workflows in parallel if cluster engine is availible")
+parser.add_argument("-ipython", action="store_true",
+                    help="run workflow in paralell with IPython plugin")
 args = parser.parse_args()
 
 # Define some paths
@@ -130,4 +130,8 @@ normalize.connect([
     ])
 
 if __name__ == "__main__" and args.pype:
-    normalize.run()
+    if args.ipython:
+        plugin="IPython"
+    else:
+        plugin="Linear"
+    normalize.run(plugin=plugin)
