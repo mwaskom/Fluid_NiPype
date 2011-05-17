@@ -31,6 +31,7 @@ cont07 = ["fast-normal",  "T", events, [0,-1,1,0,0]]
 cont08 = ["vfast-slow",   "T", events, [-1,0,0,1,0]]
 cont09 = ["vfast-normal", "T", events, [0,-1,0,1,0]]
 cont10 = ["vfast-fast",   "T", events, [0,0,-1,1,0]]
+cont11 = ["all_speeds",   "T", events, [1./4,1./4,1./4,1./4,0]]
 
 convars = [var for var in dir() if re.match("cont\d+",var)]
 convars.sort()
