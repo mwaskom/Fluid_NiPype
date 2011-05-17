@@ -4,6 +4,7 @@ import os
 import sys
 import shutil
 from glob import glob
+from os.path import join as pjoin
 import numpy as np
 from scipy import isnan
 from scipy.io import loadmat
@@ -330,6 +331,18 @@ def write_preproc_report(html, subj, paradigm):
             html.write_text("Could not open %s for reading"%outfile)
         html.newline(2)
 
+        try:
+            maxfile =  pjoin(ANALYSIS_DIR,paradigm,subj,"preproc","run_%d"%r,"max_motion.txt")
+            info = [l.strip() for l in open(maxfile).readlines()]
+            html.write_text("Maximum RMS Motion:", bold=True)
+            html.newline()
+            html.write_text("Absolute -- %s mm"%info[1])
+            html.newline()
+            html.write_text("Relative -- %s mm"%info[3])
+        except IOError:
+            html.write_text("Could not open %s for reading"%maxfile)
+        html.newline(2)
+
         html.write_text("Motion Plots",bold=True)
 
         for plot_type in ["rotation", "translation", "displacement"]:
@@ -370,7 +383,7 @@ def write_model_report(html, subj, paradigm):
         html.write_image(glm_img)
         html.newline()
 
-        cov_img = os.path.join(srcdir, "design_covariance.png")
+        cov_img = os.path.join(srcdir, "stimulus_correlation.png")
         html.write_text("Design Covariance")
         html.write_image(cov_img)
         html.newline()
@@ -432,6 +445,14 @@ def write_homepage():
     for subjlist in ante_subjects, post_subjects:
         html.write_link_table(os.path.join(DATA_DIR,"%s","report","report.html"),"%s",subjlist,10)
         html.newline()
+
+    html.write_section_head("Preprocessing Diagnostics")
+    html.newline()
+    pars = [p.split("/")[-2] for p in glob(os.path.join(
+        REPORT_DIR,"preproc_diagnostics","*","diagnostics.html"))]
+    html.write_link_table(os.path.join(REPORT_DIR,"preproc_diagnostics","%s","diagnostics.html"),
+                          "%s", pars, 10)
+
 
 if __name__ == "__main__":
     main()

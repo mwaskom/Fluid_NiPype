@@ -124,6 +124,12 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
                           name="plotdisplacement",
                           iterfield=["in_file"])
 
+    maxmotion = pe.MapNode(util.Function(input_names=["rms_files"],
+                                         output_names=["out_file"],
+                                         function=max_motion_func),
+                           iterfield=["rms_files"],
+                           name="maxmotion")
+
     # Get a mean image of the realigned timeseries
     meanfunc1 = pe.MapNode(fsl.MeanImage(),
                            iterfield=["in_file"],
@@ -152,6 +158,7 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
         (realign,    plotrot,       [("par_file", "in_file")]),
         (realign,    plottrans,     [("par_file", "in_file")]),
         (realign,    plotdisp,      [("rms_files","in_file")]),
+        (realign,    maxmotion,     [("rms_files","rms_files")]),
         (realign,    meanfunc1,     [("out_file", "in_file")]),
         (meanfunc1,  stripmean,     [("out_file", "in_file")]),
         (realign,    maskfunc1,     [("out_file", "in_file")]),
@@ -411,7 +418,8 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
                      "mean_func_slices",
                      "intensity_plot",
                      "outlier_volumes",
-                      "rotation_plot",
+                     "max_motion",
+                     "rotation_plot",
                      "translation_plot",
                      "displacement_plot"]
     if anat_reg:
@@ -440,6 +448,7 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
     rename.connect(plotrot,        "rotation_plot")
     rename.connect(plottrans,      "translation_plot")
     rename.connect(plotdisp,       "displacement_plot")
+    rename.connect(maxmotion,      "max_motion")
     rename.connect(exampleslice,   "example_func_slices")
     rename.connect(meanslice,      "mean_func_slices")
 
@@ -455,10 +464,22 @@ def get_preproc_workflow(name="preproc", anat_reg=True, mcflirt_sinc_search=True
 # Connecting functions
 # --------------------
 
+def max_motion_func(rms_files):
+    """Determine the maximum absolute and relative motion values."""
+    from os import getcwd
+    from os.path import join
+    from numpy import loadtxt, max
+    motion = map(loadtxt, rms_files)
+    maxima = map(max, motion)
+    out_file = join(getcwd(), "max_motion.txt")
+    with open(out_file, "w") as f:
+        f.write("#Absolute:\n%.4f\n#Relative\n%.4f"%tuple(maxima))
+    return out_file
+
 def get_middle_volume(func):
     """Return the middle volume index."""
-    import nibabel
-    return [(nibabel.load(f).get_shape()[3]/2)-1 for f in func]
+    from nibabel import load
+    return [(load(f).get_shape()[3]/2)-1 for f in func]
 
 def get_thresh_op(thresh):
     """Return an fslmaths op string to get10% of the intensity"""
