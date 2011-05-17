@@ -79,6 +79,8 @@ def main(arglist):
         # Run the workflow
         if args.ipython:
             plugin = "IPython"
+        elif args.multiproc:
+            plugin="MultiProc"
         else:
             plugin = "Linear"
         unpacker.run(plugin=plugin)
@@ -621,27 +623,12 @@ def preprocess_anatomicals(data_dir, subject_list, types, stages):
             proc_list.append("recon-all -s %s -all"%subj)
 
         if "dwi" in stages:
-            # Figure out where the diffusion DICOM is
-            dicom_dir = pjoin(subj_dir, "dicom", scan_type)
-            cache_file = pjoin(data_dir, subj, "unpack", "%s-infocache.npy"%scan_type)
-            info = load_info_cache(cache_file)
-            # Info pops out as a tuple
-            names = info[3]
-            dicom_files = info[0]
-            try:
-                dwi_index = [s for s, n in enumerate(names) if n == "diffusion"][0]
-            except IndexError:
-                print "Could not find diffusion DICOM in scan info file for %s"%subj
-                continue
-            
-            # Here's the first element of the diffusion DICOM series
-            dwi_dicom = pjoin(dicom_dir, dicom_files[dwi_index])
-
-            # Specify the output dir
-            dwi_dir = pjoin(subj_dir, "dwi")
-
+            dwi_file = pjoin(data_dir, subj, "dwi", "diffusion.nii.gz")
+            bval_file = pjoin(data_dir, "dwi.bvals")
+            bvec_file = pjoin(data_dir, "dwi.bvecs")
+            dwi_dir = pjoin(data_dir, subj, "dwi")
             # Add the dt_recon command to the processing list
-            proc_list.append("dt_recon --i %s --s %s --o %s --no-tal"%(dwi_dicom, subj, dwi_dir))
+            proc_list.append("dt_recon --i %s --b %s %s --s %s --o %s --no-tal --no-reg"%(dwi_file, bval_file, bvec_file, subj, dwi_dir))
 
         if "norm" in stages:
             # Check to make sure the recon-all source image exists at least.
@@ -677,7 +664,7 @@ def submit_to_sge(subject_id, proc_list):
                   "#$ -V",
                   "#$ -cwd",
                   "#$ -N %s"%job_name,
-                  "#$ -r y",
+                  #$ -r y",
                   "#$ -S /bin/bash",
                   "\n"]
         q.write("\n".join(header)) 
@@ -742,6 +729,7 @@ def parse_cmdline(arglist):
     parser.add_argument("-relink", action="store_true",
                         help="overwrite any old heuristic links")
     parser.add_argument("-workingdir", help="specify working directoy")
+    parser.add_argument("-multiproc", action="store_true")
     parser.add_argument("-ipython", action="store_true",
                         help="run in parallel using IPython")
     
