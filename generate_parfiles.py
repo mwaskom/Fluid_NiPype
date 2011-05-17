@@ -92,7 +92,7 @@ def gen_mot(matfiletemplate, day, subject, srcdir, trgdir):
                             then = D.actualEventStartTime[i+2]
                             fid.write("%.2f\t%.2f\t1\n"%(now, then-now))
                 fid.close()
-            parfile = os.path.join(trgdir, "MOT_%s_r1_d1_resp_%s.txt"%(runtype,subject))
+            parfile = os.path.join(trgdir, "MOT_%s_r1_d%d_resp_%s.txt"%(runtype, day, subject))
             print "   Writing %s"%parfile
             fid = open(parfile,"w")
             for i, time in enumerate(D.actualEventStartTime):
