@@ -27,6 +27,8 @@ parser.add_argument("-workflows", nargs="*",
                     help="which workflows to run (cvt, reg, fit)")
 parser.add_argument("-ipython",action="store_true")
 parser.add_argument("-multiproc",action="store_true")
+parser.add_argument("-engines",type=int)
+parser.add_argument("-torque", action="store_true")
 args = parser.parse_args()
 
 if args.workflows == ["all"]:
@@ -143,7 +145,7 @@ hemisource.iterables = ("hemi", ["lh","rh"])
 
 # Sample the T1 volume onto the cortical surface
 t1surf = pe.Node(fs.SampleToSurface(reg_header=True,
-                                    sampling_range=(.1,.75,.1),
+                                    sampling_range=(0,.75,.05),
                                     sampling_units="frac",
                                     cortex_mask=True),
                  name="t1surf")
@@ -182,13 +184,21 @@ if args.ipython:
     plugin = "IPython"
 elif args.multiproc:
     plugin = "MultiProc"
+elif args.torque:
+    plugin = "PBS"
 else:
     plugin = "Linear"
 
 
 def workflow_runner(flow, stem):
+    if plugin == "MultiProc":
+        plugin_args=dict(n_procs=args.engines)
+    elif plugin == "PBS":
+        plugin_args=dict(qsub_args="-q gablab")
+    else:
+        plugin_args=dict()
     if any([a.startswith(stem) for a in args.workflows]) or args.workflows==["all"]:
-        flow.run(plugin=plugin)
+        flow.run(plugin=plugin,plugin_args=plugin_args)
 
 if __name__ == "__main__":
     workflow_runner(reg_pipe, "reg")
