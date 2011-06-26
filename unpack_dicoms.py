@@ -77,13 +77,15 @@ def main(arglist):
         archive_crashdumps(unpacker)
         
         # Run the workflow
+        plugin_args = dict()
         if args.ipython:
             plugin = "IPython"
-        elif args.multiproc:
-            plugin="MultiProc"
-        else:
+        elif args.linear:
             plugin = "Linear"
-        unpacker.run(plugin=plugin)
+        else:
+            plugin="MultiProc"
+            plugin_args['n_procs'] = 4
+        unpacker.run(plugin=plugin, plugin_args=plugin_args)
     
     if doall or "cache" in args.procs:
         # Cache the runinfo to a .npy file
@@ -729,7 +731,7 @@ def parse_cmdline(arglist):
     parser.add_argument("-relink", action="store_true",
                         help="overwrite any old heuristic links")
     parser.add_argument("-workingdir", help="specify working directoy")
-    parser.add_argument("-multiproc", action="store_true")
+    parser.add_argument("-linear", action="store_true")
     parser.add_argument("-ipython", action="store_true",
                         help="run in parallel using IPython")
     

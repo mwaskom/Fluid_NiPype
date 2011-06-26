@@ -49,6 +49,8 @@ parser.add_argument("-ipython",action="store_true",
                     help="run in parallel using IPython")
 parser.add_argument("-multiproc",action="store_true",
                     help="run in parallel using Multiprocessing")
+parser.add_argument("-torque", action="store_true",
+                    help="run in parallel using Torque")
 parser.add_argument("-tempdir",action="store_true",
                     help="write all output to temporary directory")
 args = parser.parse_args()
@@ -567,6 +569,8 @@ def workflow_runner(wf, stem):
             wf.run(plugin="IPython")
         elif args.multiproc:
             wf.run(plugin="MultiProc")
+        elif args.torque:
+            wf.run(plugin="PBS", plugin_args=dict(qsub_args="-q gablab"))
         else:
             wf.run(plugin="Linear")
         report()
