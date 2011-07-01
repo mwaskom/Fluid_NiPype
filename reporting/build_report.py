@@ -298,32 +298,49 @@ def write_timeseries_report(html, subj, paradigm):
             html.write_text("Source timeseries could not be read by Nibabel")
 
         moviefile = os.path.join(ANALYSIS_DIR, paradigm, subj, "preproc", "run_%d"%r, "timeseries_movie.gif")
-        html.write_image(moviefile)
+        if os.path.exists(moviefile):
+            html.write_image(moviefile)
+        else:
+            html.write_text("Could not find %s for display" % moviefile)
 
 def write_preproc_report(html, subj, paradigm):
 
     for r in range(1, FUNC_RUNS[paradigm] + 1):
-    
-        srcdir = os.path.join(ANALYSIS_DIR, paradigm, subj, "preproc", "run_%d"%r)
+        
+        if paradigm == "resting":
+            srcdir = os.path.join(ANALYSIS_DIR, paradigm, subj)
+        else:
+            srcdir = os.path.join(ANALYSIS_DIR, paradigm, subj, "preproc", "run_%d"%r)
 
         html.newline()
         html.write_section_head("Run %d"%r)
         html.newline()
 
         html.write_text("Motion Correction Target",bold=True)
-        html.write_image(os.path.join(srcdir, "example_func_slices.png"))
+        if paradigm == "resting":
+            html.write_image(os.path.join(srcdir, "example_func.png"))
+        else:
+            html.write_image(os.path.join(srcdir, "example_func_slices.png"))
         html.newline()
         
         html.write_text("Mean Functional Image",bold=True)
-        html.write_image(os.path.join(srcdir, "mean_func_slices.png"))
+        if paradigm == "resting":
+            html.write_image(os.path.join(srcdir, "mean_func.png"))
+        else:
+            html.write_image(os.path.join(srcdir, "mean_func_slices.png"))
         html.newline()
+
+        if paradigm == "resting":
+            html.write_text("Confound Sources", bold=True)
+            html.write_image(os.path.join(srcdir, "confound_sources.png"))
+            html.newline()
 
         html.write_text("Mean Intensity Plot",bold=True)
         html.write_image(os.path.join(srcdir, "intensity_plot.png"))
         html.newline()
 
         try:
-            outfile = os.path.join(ANALYSIS_DIR,paradigm,subj,"preproc","run_%d"%r,"outlier_volumes.txt")
+            outfile = os.path.join(srcdir,"outlier_volumes.txt")
             nout = len(open(outfile).read().strip().split())
             html.write_text("Total Outlier Volumes:&nbsp;",bold=True)
             html.write_text(nout)
@@ -332,7 +349,7 @@ def write_preproc_report(html, subj, paradigm):
         html.newline(2)
 
         try:
-            maxfile =  pjoin(ANALYSIS_DIR,paradigm,subj,"preproc","run_%d"%r,"max_motion.txt")
+            maxfile =  pjoin(srcdir, "max_motion.txt")
             info = [l.strip() for l in open(maxfile).readlines()]
             html.write_text("Maximum RMS Motion:", bold=True)
             html.newline()
@@ -355,9 +372,13 @@ def write_registration_report(html, subj, paradigm):
         
         html.write_section_head("Run %s"%r)
 
-        srcdir = os.path.join(ANALYSIS_DIR, paradigm, subj, "preproc", "run_%d"%r)
+        if paradigm == "resting":
+            srcdir = os.path.join(ANALYSIS_DIR, paradigm, subj)
+            costfile = os.path.join(srcdir, "func2anat_cost.dat")
+        else:
+            srcdir = os.path.join(ANALYSIS_DIR, paradigm, subj, "preproc", "run_%d"%r)
+            costfile = os.path.join(srcdir, "func2anat.mincost")
         
-        costfile = os.path.join(srcdir, "func2anat.mincost")
         try:
             cost = open(costfile).read().split()[0]
             html.write_text("Final boundary-based registration cost value: %s"%cost)

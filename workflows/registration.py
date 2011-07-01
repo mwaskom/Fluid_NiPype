@@ -7,12 +7,13 @@ import nipype.interfaces.utility as util
 def get_registration_workflow(name="registration", 
                               volume=False,
                               surface=False,
-                              surface_smooth=True):
+                              native_surf_smooth=True,
+                              norm_surf_smooth=True):
 
     registration = pe.Workflow(name=name)
 
     if not surface:
-        surface_smooth = False
+        norm_surf_smooth, native_surf_smooth = False, False
 
     # Define the inputs for the registation workflow
     infields = []
@@ -20,7 +21,7 @@ def get_registration_workflow(name="registration",
         infields.extend(["vol_source", "warpfield", "fsl_affine"])
     if surface:
         infields.extend(["surf_source", "subject_id", "tkreg_affine"])
-    if surface_smooth:
+    if (norm_surf_smooth or native_surf_smooth):
         infields.extend(["smooth_fwhm"])
     inputnode = pe.Node(util.IdentityInterface(fields=infields),
                         name="inputspec")
@@ -28,7 +29,9 @@ def get_registration_workflow(name="registration",
     if volume:
 
         mni152 = fsl.Info.standard_image("avg152T1_brain.nii.gz")
-        applywarp = pe.MapNode(fsl.ApplyWarp(ref_file=mni152),
+        applywarp = pe.MapNode(fsl.ApplyWarp(ref_file=mni152,
+                                             interp="spline",
+                                             ),
                                 iterfield=["in_file", "premat"],
                              name="applywarp")
         
@@ -70,35 +73,40 @@ def get_registration_workflow(name="registration",
             (hemisource,   surftransform,  [("hemi", "hemi")]),
             ])
 
-    if surface_smooth:
+    if norm_surf_smooth:
 
         smoothnormsurf = pe.MapNode(fs.SurfaceSmooth(subject_id="fsaverage",
                                                      reshape=True),
                                     iterfield=["in_file"],
                                     name="smoothnormsurf")
+        registration.connect([
+            (surftransform,smoothnormsurf, [("out_file", "in_file")]),
+            (hemisource,   smoothnormsurf, [("hemi", "hemi")]),
+            (inputnode,    smoothnormsurf, [("smooth_fwhm", "fwhm")]),
+            (smoothnormsurf, cvtnormsurf,  [("out_file", "in_file")]),
+            ])
+
+    elif surface:
+        registration.connect(surftransform, "out_file", cvtnormsurf, "in_file")
+
+    if native_surf_smooth:
 
         smoothnatsurf = pe.MapNode(fs.SurfaceSmooth(),
                                    iterfield=["in_file"],
                                    name="smoothnativesurf")
 
         registration.connect([
-            (surftransform,smoothnormsurf, [("out_file", "in_file")]),
-            (hemisource,   smoothnormsurf, [("hemi", "hemi")]),
-            (inputnode,    smoothnormsurf, [("smooth_fwhm", "fwhm")]),
             (surfproject,  smoothnatsurf,  [("out_file", "in_file")]),
             (hemisource,   smoothnatsurf,  [("hemi", "hemi")]),
             (inputnode,    smoothnatsurf,  [("subject_id", "subject_id"),
                                             ("smooth_fwhm", "fwhm")]),
-            (smoothnormsurf, cvtnormsurf,  [("out_file", "in_file")]),
             ])
-    elif surface:
-        registration.connect(surftransform, "out_file", cvtnormsurf, "in_file")
 
     outfields = []
     if volume:
         outfields.append("warped_image")
     if surface:
-        outfields.extend(["image", "image_fsaverage"])
+        outfields.extend(["surface_image", "surface_image_fsaverage"])
    
     outputnode = pe.Node(util.IdentityInterface(fields=outfields),
                          name="outputspec")
@@ -108,9 +116,16 @@ def get_registration_workflow(name="registration",
             (applywarp, outputnode, [("out_file", "warped_image")]),
             ])
     if surface:
+        if native_surf_smooth:
+            registration.connect([
+                (smoothnatsurf, outputnode, [("out_file", "surface_image")]),
+                ])
+        else:
+            registration.connect([
+                (surfproject, outputnode, [("out_file", "surface_image")]),
+                ])
         registration.connect([
-            (smoothnatsurf, outputnode, [("out_file", "image")]),
-            (cvtnormsurf,   outputnode, [("out_file", "image_fsaverage")]),
+            (cvtnormsurf,   outputnode, [("out_file", "surface_image_fsaverage")]),
             ])
     
     return registration, inputnode, outputnode
