@@ -72,7 +72,7 @@ def main(arglist):
     # Set up the datasink
     datasink = pe.Node(io.DataSink(base_directory=analysis_dir,
                                    regexp_substitutions=[(r"_\w+\d", ""),
-                                                         (r"_hemi_{lr}h", "")]),
+                                                         (r"_hemi_[lr]h", "")]),
                        name="datasink")
     flutil.subject_container(wf, subjectsource, datasink)
     flutil.sink_outputs(wf, wf_output, datasink, "@") 

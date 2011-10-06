@@ -67,15 +67,15 @@ def create_resting_workflow(name="resting_state"):
                            iterfield=["in_file"],
                            name="img2float")
 
-    # Connect the nodes for the first stage of preprocessing
-
-    realign = create_realignment_workflow()
 
     # Perform slice-timing correction
     slicetime = pe.MapNode(fsl.SliceTimer(interleaved=True,
                                           time_repetition=6),
                            iterfield=["in_file"],
                            name="slicetime")
+
+    # Motion correct
+    realign = create_realignment_workflow()
 
     skullstrip = create_skullstrip_workflow()
 
@@ -100,9 +100,10 @@ def create_resting_workflow(name="resting_state"):
         (inputnode,   trimmer,       [("timeseries", "in_file"),
                                      (("timeseries", get_trimmed_length), "t_size")]),
         (trimmer,     img2float,     [("roi_file", "in_file")]),
-        (img2float,   realign,       [("out_file", "inputs.timeseries")]),
-        (realign,     slicetime,     [("outputs.timeseries", "in_file")]),
-        (slicetime,   skullstrip,    [("slice_time_corrected_file", "inputs.timeseries")]),
+        (img2float,   slicetime,     [("out_file", "in_file")]),
+        (slicetime,   realign,       [("slice_time_corrected_file", "inputs.timeseries")]),
+        (realign,     skullstrip,    [("outputs.timeseries", "inputs.timeseries")]),
+
         (realign,     art,           [("outputs.realign_parameters", "inputs.realignment_parameters")]),
         (img2float,   art,           [("out_file", "inputs.raw_timeseries")]),
         (skullstrip,  art,           [("outputs.timeseries", "inputs.realigned_timeseries"),
@@ -940,7 +941,7 @@ def write_art_plot(intensity_file, outlier_file):
 
     # Plot the outliers
     try:
-        outliers = np.loadtxt(outlier_file)
+        outliers = np.loadtxt(outlier_file, ndmin=1)
         for out in outliers:
             ax.axvline(out, color="r")
     except IOError:
